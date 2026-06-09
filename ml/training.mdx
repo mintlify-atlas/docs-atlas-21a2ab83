@@ -1,0 +1,224 @@
+---
+title: "Training the CoffePrice Hybrid Prediction Model"
+sidebarTitle: "Training"
+description: "How to retrain the CoffePrice FNC hybrid model locally. Covers installing Python dependencies, running the data pipeline, and interpreting the output metrics."
+---
+
+The CoffePrice model is retrained from scratch on every pipeline run — there is no incremental update. This ensures the ensemble weights, strategy selection, and calibration factor always reflect the most recent historical data. Retraining takes roughly 30–90 seconds on a standard laptop depending on dataset size.
+
+## Prerequisites
+
+- **Python 3.9+** (the GitHub Actions workflow uses 3.11)
+- **pip** package manager
+- Raw or pre-fetched market data files in `ml-service-experimental/datos/`
+
+## Installation and Full Pipeline Run
+
+<Steps>
+  <Step title="Navigate to the ML service directory">
+    All scripts must be run from inside `ml-service-experimental/` because they use `Path(__file__).resolve().parent` to locate data and model directories.
+
+    ```bash
+    cd ml-service-experimental
+    ```
+  </Step>
+  <Step title="Install Python dependencies">
+    Two requirements files are provided. `requirements.txt` and `requirements_hibrido.txt` are currently identical — install both to be safe:
+
+    ```bash
+    pip install -r requirements.txt
+    pip install -r requirements_hibrido.txt
+    ```
+
+    Core dependencies:
+
+    ```
+    pandas==2.0.3
+    numpy==1.24.3
+    prophet==1.1.5
+    xgboost==2.0.3
+    scikit-learn==1.3.0
+    requests==2.31.0
+    beautifulsoup4==4.12.2
+    pytz==2023.3
+    ```
+  </Step>
+  <Step title="Prepare raw data files">
+    Place your historical market data CSVs inside `datos/`. At minimum you need:
+    - `precios_fnc_historicos.csv` — columns: `ds` (date), `y` (FNC price in COP)
+    - KC data: either `precios_limpios.csv` (already cleaned) or raw `Precios cafe.csv` / `Precios_cafe.csv`
+    - TRM data: either `trm_limpias.csv` (already cleaned) or raw `Tasa de cambio TRM.csv` / `Tasa_de_cambio_TRM.csv`
+
+    The pipeline requires a minimum of **45 records** to proceed.
+  </Step>
+  <Step title="Clean market data">
+    Consolidates raw KC and TRM files, applies range filters, normalises decimals, and deduplicates:
+
+    ```bash
+    python limpiar_datos.py
+    ```
+
+    Outputs: `datos/precios_limpios.csv`, `datos/trm_limpias.csv`
+  </Step>
+  <Step title="Build external variables">
+    Merges optional external feeds (USD/BRL, Brazil climate, ICE inventories) into a single CSV aligned to the FNC date range:
+
+    ```bash
+    python variables_externas.py
+    ```
+
+    Output: `datos/variables_externas.csv`
+  </Step>
+  <Step title="Run the full pipeline">
+    `actualizar_todo.py` orchestrates every step end-to-end in the correct order:
+
+    ```bash
+    python actualizar_todo.py
+    ```
+
+    You can also target a specific prediction date:
+
+    ```bash
+    python actualizar_todo.py --fecha-prediccion 2025-06-10
+    ```
+  </Step>
+</Steps>
+
+## What `actualizar_todo.py` Does
+
+The orchestrator runs these steps sequentially. Critical steps abort the pipeline on failure; non-critical ones log a warning and continue.
+
+| Step | Script | Critical? | Description |
+|------|--------|-----------|-------------|
+| 1 | `obtener_kc_automatico.py` | ✅ | Fetch latest KC=F price from Yahoo Finance |
+| 2 | `obtener_trm_automatico.py` | ✅ | Fetch latest COP/USD TRM from Frankfurter / open.er-api |
+| 3 | `obtener_fnc_automatico.py` | ⚠️ | Scrape today's FNC price from the FNC website |
+| 4 | `obtener_usd_brl.py` | ⚠️ | Fetch USD/BRL rate |
+| 5 | `obtener_clima_brasil.py` | ⚠️ | Fetch Brazil weather alerts |
+| 6 | `obtener_inventarios_ice.py` | ⚠️ | Fetch ICE inventory levels |
+| 7 | `limpiar_datos.py` | ✅ | Clean and deduplicate KC and TRM data |
+| 8 | `variables_externas.py` | ✅ | Build `variables_externas.csv` |
+| 9 | `entrenar_fnc_hibrido.py` | ✅ | Train Prophet + XGBoost, compute ensemble weights, save artefacts |
+| 10 | `predecir_fnc_hibrido.py` | ✅ | Generate next-day prediction and write JSON |
+| 11 | `evaluar_predicciones_fnc.py` | ⚠️ | Update evaluation CSV with any newly-available real FNC prices |
+
+## Training Details
+
+### Train/Test Split
+
+The pipeline uses a **temporal holdout** — never random shuffling — to prevent data leakage:
+
+```python
+test_size = max(14, int(round(len(df) * 0.20)))  # at least 14 days, at most 21
+split_idx = len(df) - test_size
+train = df.iloc[:split_idx]
+holdout = df.iloc[split_idx:]
+```
+
+- Minimum records required: **45**
+- Minimum training rows after split: **30**
+- Minimum holdout rows: **10**
+
+### Prophet Configuration
+
+```python
+Prophet(
+    yearly_seasonality=True,
+    weekly_seasonality=True,
+    daily_seasonality=False,
+    changepoint_prior_scale=0.08,
+    seasonality_prior_scale=8.0,
+    interval_width=0.8,
+)
+```
+
+External regressors added: `kc_centavos`, `trm`
+
+### XGBoost Configuration
+
+Two XGBoost models are trained — one corrects the Prophet residual, one corrects the formula residual:
+
+```python
+# Prophet-residual corrector
+XGBRegressor(
+    n_estimators=250, max_depth=4, learning_rate=0.04,
+    subsample=0.85, colsample_bytree=0.85,
+    reg_alpha=0.2, reg_lambda=1.2,
+    objective="reg:squarederror", random_state=42,
+)
+
+# Formula-residual corrector
+XGBRegressor(
+    n_estimators=220, max_depth=3, learning_rate=0.04,
+    subsample=0.9, colsample_bytree=0.9,
+    reg_alpha=0.25, reg_lambda=1.4,
+    objective="reg:squarederror", random_state=84,
+)
+```
+
+Both use the full **40-column feature set** returned by `feature_columns()`, which includes all lag features, moving averages, formula columns, calendar columns, external variables, and `prophet_yhat`.
+
+### Strategy Selection Logic
+
+After evaluating holdout MAPE for all four strategies, the winning strategy is chosen by `choose_primary_strategy()`:
+
+1. Sort strategies ascending by holdout MAPE.
+2. If the best strategy is not `naive`, return it.
+3. If the best strategy is `naive`, check whether the second-best is within 20% relative error. If so, fall back to `ensemble` (to avoid over-relying on carry-forward).
+4. Otherwise, `naive` wins.
+
+If `ensemble` is selected, a final comparison is run between `prophet`, `hybrid`, `formula`, and `ensemble` to pick the single best performer.
+
+## Output Files After Training
+
+| File | Description |
+|------|-------------|
+| `modelos/modelo_prophet_hibrido.pkl` | Serialised Prophet model (final, fit on all data) |
+| `modelos/modelo_xgboost.pkl` | Serialised XGBoost Prophet-residual corrector |
+| `modelos/modelo_formula_xgboost.pkl` | Serialised XGBoost formula-residual corrector |
+| `modelos/features_hibrido.pkl` | Feature config dict: `feature_cols`, `best_strategy`, `ensemble_weights`, `recent_change_limit` |
+| `modelos/metricas_fnc_hibrido.json` | Full metrics report (see below) |
+| `backend/datos/predicciones_fnc.json` | Latest prediction payload for the API |
+| `datos/historial_predicciones_fnc.csv` | Appended prediction history row |
+
+## Interpreting `metricas_fnc_hibrido.json`
+
+```json
+{
+  "estrategia_seleccionada": "naive",
+  "estado_modelo": "usable",
+  "registros_base": 361,
+  "registros_supervisados": 354,
+  "rango_entrenamiento": {
+    "desde": "2025-05-30",
+    "hasta": "2026-05-25"
+  },
+  "max_cambio_diario_permitido": 0.02853,
+  "ensemble_weights": {
+    "naive": 0.4516,
+    "prophet": 0.0987,
+    "hybrid": 0.092,
+    "formula": 0.3577
+  },
+  "metricas": {
+    "train": { ... },
+    "holdout": { ... }
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `estrategia_seleccionada` | The primary strategy chosen for prediction (`naive`, `prophet`, `hybrid`, or `formula`). Influences explanation text and blending logic at prediction time. |
+| `estado_modelo` | `"usable"` if the winning strategy's holdout MAPE ≤ 1.0%; otherwise `"seguir_en_pruebas"` (keep testing). |
+| `registros_base` | Total rows in the merged daily base dataframe before creating the supervised frame. |
+| `registros_supervisados` | Rows in the final training frame after dropping NaNs from feature construction. |
+| `rango_entrenamiento` | ISO date range covered by the training data. |
+| `max_cambio_diario_permitido` | Safety clamp: maximum allowed daily price change as a fraction (e.g., `0.02853` = 2.853%). Derived from the 90th percentile of recent 30-day daily changes × 1.15. |
+| `ensemble_weights` | Inverse-MAPE weights used at prediction time (with naive penalty applied). |
+| `metricas.train` | In-sample MAPE and MAE for each strategy. Low values here do not guarantee good holdout performance. |
+| `metricas.holdout` | Out-of-sample MAPE and MAE — the primary quality signal. The winning strategy is selected from these values. |
+
+<Tip>
+After a few days have passed since the last training run, run `python evaluar_predicciones_fnc.py` on its own to backfill the evaluation CSV with the real FNC prices that have since been published. This lets you track cumulative MAPE, range hit rate, and trend accuracy over time without having to retrain the model.
+</Tip>

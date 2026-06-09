@@ -1,0 +1,90 @@
+---
+title: "Authentication API Overview for CoffePrice"
+sidebarTitle: "Overview"
+description: "CoffePrice uses JWT authentication stored in HttpOnly cookies. Supports email/password registration with verification codes and Google OAuth 2.0. Includes rate limiting on all auth endpoints."
+---
+
+CoffePrice's authentication layer supports two sign-in strategies: **email/password with email verification** and **Google OAuth 2.0**. All authenticated sessions are tracked via a signed JWT stored in a secure, HttpOnly cookie. Every auth endpoint is rate-limited at the middleware level to protect against brute-force and enumeration attacks.
+
+---
+
+## Authentication Mechanism
+
+After a successful login or registration flow, the server issues a JWT and stores it in an **HttpOnly cookie** named `auth_token`. Subsequent requests to protected routes are automatically authenticated via that cookie.
+
+If you need to authenticate without cookie support (e.g., from a native mobile client or server-to-server context), you can pass the token in the `Authorization` header instead:
+
+```bash
+Authorization: Bearer <token>
+```
+
+The middleware checks `req.cookies.auth_token` first, then falls back to the `Authorization` header.
+
+### Token Expiry
+
+Token lifetime is controlled by the `JWT_EXPIRES_IN` environment variable. If not set, the default is **`7d`** (seven days).
+
+```bash
+JWT_EXPIRES_IN=1d   # example: set token to expire after 1 day
+```
+
+---
+
+## Rate Limits
+
+All auth endpoints are guarded by `express-rate-limit`. Limits apply per IP address over a **15-minute rolling window**.
+
+| Limiter                      | Endpoint                         | Max requests / 15 min |
+| ---------------------------- | -------------------------------- | --------------------- |
+| `loginLimiter`               | `POST /api/auth/login`           | 10                    |
+| `registerLimiter`            | `POST /api/auth/register`        | 100                   |
+| `verifyLimiter`              | `POST /api/auth/verify-email`    | 6                     |
+| `resendVerificationLimiter`  | `POST /api/auth/resend-verification` | 4                 |
+
+When a limit is exceeded the server responds with **HTTP 429** and a JSON body describing the error. Rate-limit metadata is returned via standard `RateLimit-*` response headers (`standardHeaders: true`).
+
+---
+
+## Account States and API Access
+
+Every user record carries an `estado` field that gates access to protected routes. The middleware evaluates this field on every authenticated request.
+
+| Estado        | Access level                                                                                                   |
+| ------------- | -------------------------------------------------------------------------------------------------------------- |
+| `activo`      | Full access to all protected routes.                                                                           |
+| `pendiente` (non-`comprador`) | Restricted to `GET /api/auth/me` and `POST /api/auth/logout` only.                        |
+| `pendiente` (`comprador` rol) | Can access all `/api/comprador` routes plus `GET /api/auth/me` and `POST /api/auth/logout`. |
+| `suspendido`  | Limited to `POST /api/usuario/reactivar`, `GET /api/auth/me`, and `POST /api/auth/logout`.                     |
+| `rechazado`   | Blocked from all protected routes. Returns `403 Cuenta rechazada`.                                            |
+| `eliminado`   | Blocked from all protected routes. Returns `403 Esta cuenta ha sido eliminada`.                               |
+
+---
+
+## Endpoints Summary
+
+| Method | Path                              | Auth Required | Description                                              |
+| ------ | --------------------------------- | ------------- | -------------------------------------------------------- |
+| `POST` | `/api/auth/register`              | No            | Create a new account (productor or comprador).           |
+| `POST` | `/api/auth/login`                 | No            | Authenticate with email and password; sets auth cookie.  |
+| `POST` | `/api/auth/verify-email`          | No            | Submit the 6-digit verification code sent by email.      |
+| `POST` | `/api/auth/resend-verification`   | No            | Re-send the 6-digit verification code to the user.       |
+| `GET`  | `/api/auth/me`                    | Yes           | Return the currently authenticated user's profile.       |
+| `POST` | `/api/auth/logout`                | No            | Clear the auth cookie and destroy the session.           |
+| `GET`  | `/api/auth/google`                | No            | Initiate Google OAuth 2.0 flow (pass `?rol=` param).     |
+| `GET`  | `/api/auth/google/callback`       | No            | OAuth callback; sets auth cookie and redirects frontend. |
+
+---
+
+## Explore the Auth Endpoints
+
+<CardGroup cols={3}>
+  <Card title="Register" icon="user-plus" href="/api/auth/register">
+    Create a new account with email and password.
+  </Card>
+  <Card title="Login" icon="arrow-right-to-bracket" href="/api/auth/login">
+    Authenticate and manage your session.
+  </Card>
+  <Card title="Google OAuth" icon="google" href="/api/auth/google-oauth">
+    Sign in with a Google account via OAuth 2.0.
+  </Card>
+</CardGroup>

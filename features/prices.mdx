@@ -1,0 +1,164 @@
+---
+title: "Real-Time FNC Coffee Prices in CoffePrice"
+sidebarTitle: "Live Prices"
+description: "CoffePrice scrapes the FNC internal coffee price twice daily on weekdays, falls back to NY futures, and exposes prices via a public REST API with buyer-level breakdown."
+---
+
+CoffePrice surfaces live coffee purchase prices posted by approved buyers across Huila. Each price record is tied to a specific buyer (`comprador`) and coffee type (`tipocafe`), and is visible to any producer or visitor via the public API — no login required. Prices are kept fresh by an automated cron job that pulls the official FNC reference price twice every business day and by buyers themselves updating their offers in real time.
+
+## How Price Data Is Collected
+
+Price data flows from two sources that work in tandem.
+
+<Steps>
+  <Step title="Primary: FNC website scrape">
+    A Puppeteer headless-browser job navigates to `https://federaciondecafeteros.org/wp/listado-precios-cafe/` and extracts the first numeric value in the COP range 800,000 – 8,000,000. This gives the official Federación Nacional de Cafeteros (FNC) price per carga.
+  </Step>
+  <Step title="Fallback: New York KC=F futures">
+    If Puppeteer fails (network timeout, DOM change, etc.), the system queries the Yahoo Finance endpoint `KC=F` for the current arabica futures price in US cents/lb and converts it to COP/carga using a calibrated formula.
+
+    **Calibration factor (April 2025):** NY = 300.9 ¢/lb → FNC = 2,200,000 COP/carga.
+
+    ```javascript
+    const precio = Math.round((ny / 100) * 275.58 * 2654);
+    ```
+
+    The converted value is validated to be within 800,000–8,000,000 COP before being accepted.
+  </Step>
+  <Step title="Schedule">
+    The cron job runs **Monday–Friday at 8 am and 1 pm (Bogotá time, `America/Bogota`)**, implemented via `node-cron` with the expression `0 8,13 * * 1-5`. The cache is also refreshed on server start and retried every 30 minutes during the 1 pm–4 pm window if the previous attempt failed.
+  </Step>
+</Steps>
+
+<Note>
+  The FNC source tag in the cache is `fnc-directo` when the scrape succeeds, or `ny-estimado` when the fallback conversion is used. You can inspect the active source from the price metadata returned by the API.
+</Note>
+
+## Supported Coffee Types
+
+Every price record specifies a `tipocafe`. The platform supports the following commodities:
+
+| `tipocafe`      | Unit    | Description                        |
+|-----------------|---------|------------------------------------|
+| `pergamino_seco`| carga   | Dry parchment coffee (standard)    |
+| `especial`      | carga   | Specialty-grade coffee             |
+| `organico`      | carga   | Certified organic coffee           |
+| `verde`         | carga   | Green (unprocessed) coffee         |
+| `pasilla`       | kg      | Sub-grade / broken beans           |
+| `cacao`         | kg      | Cacao (complementary crop)         |
+| `limon`         | kg      | Lemon (complementary crop)         |
+
+## Price Unit Logic
+
+The model stores two price fields and derives one automatically on save:
+
+- **`preciocarga`** — the canonical price entered by the buyer (always required, always > 0).
+- **`preciokg`** — computed by a Mongoose pre-save hook:
+  - For **carga** types (`pergamino_seco`, `especial`, `organico`, `verde`): `preciokg = Math.round(preciocarga / 125)`.
+  - For **kg** types (`pasilla`, `cacao`, `limon`): `preciokg = preciocarga` (price per kg is the primary unit; `preciocarga` stores the same value).
+- **`unidad`** — set to `'carga'` or `'kg'` automatically based on `tipocafe`.
+
+## Public API
+
+### List All Active Buyer Prices
+
+```bash
+GET /api/precios
+```
+
+Returns all approved buyer prices sorted by `preciocarga` descending. Duplicate buyers are deduplicated — only the most recent price per buyer is shown. Contact details are stripped from the buyer object; only `_id`, `nombreempresa`, and `direccion` are exposed.
+
+**Optional query parameter:**
+
+| Parameter  | Type   | Description                              |
+|------------|--------|------------------------------------------|
+| `tipocafe` | string | Filter by coffee type (e.g. `pergamino_seco`) |
+
+**Example request:**
+
+```bash
+curl https://api.coffeprice.com/api/precios
+```
+
+**Example response:**
+
+```json
+[
+  {
+    "_id": "664a1f2e9b3c4d001e8f0001",
+    "comprador": {
+      "_id": "664a1e009b3c4d001e8f0010",
+      "nombreempresa": "Café del Sur S.A.S.",
+      "direccion": "Cra 5 #10-22, El Pital"
+    },
+    "tipocafe": "pergamino_seco",
+    "preciocarga": 2280000,
+    "preciokg": 18240,
+    "unidad": "carga",
+    "createdAt": "2025-06-01T13:04:11.000Z",
+    "updatedAt": "2025-06-01T13:04:11.000Z"
+  },
+  {
+    "_id": "664a1f2e9b3c4d001e8f0002",
+    "comprador": {
+      "_id": "664a1e009b3c4d001e8f0011",
+      "nombreempresa": "Coopcentral Huila",
+      "direccion": "Cl 3 #8-15, Pitalito"
+    },
+    "tipocafe": "especial",
+    "preciocarga": 2450000,
+    "preciokg": 19600,
+    "unidad": "carga",
+    "createdAt": "2025-06-01T08:15:00.000Z",
+    "updatedAt": "2025-06-01T08:15:00.000Z"
+  }
+]
+```
+
+### Prices by Buyer
+
+```bash
+GET /api/precios/comprador/:compradorId
+```
+
+Returns all price records for a single approved buyer, sorted newest-first.
+
+## Buyer Price Management
+
+Buyers (`comprador` role) and admins can manage their own price listings. All write operations require a valid JWT and the `comprador` or `admin` role.
+
+<CardGroup cols={3}>
+  <Card title="Create Price" icon="plus">
+    `POST /api/precios`
+
+    Required fields: `comprador` (ObjectId), `preciocarga` (number > 0), `tipocafe` (enum). A duplicate-suppression window of 60 seconds prevents accidental double-posts.
+  </Card>
+  <Card title="Update Price" icon="pen">
+    `PUT /api/precios/:id`
+
+    Accepts `preciocarga` and/or `tipocafe`. Only the owner buyer or an admin may update. Updates are written to the price history log automatically.
+  </Card>
+  <Card title="Delete Price" icon="trash">
+    `DELETE /api/precios/:id`
+
+    Permanently removes the price record. Ownership or admin role required.
+  </Card>
+</CardGroup>
+
+<Warning>
+  A buyer profile must have `estadoRevision: aprobado` before any price operations are permitted. Unapproved buyers receive a `403` response with the message `"Tu perfil de comprador aún no está aprobado por un administrador"`.
+</Warning>
+
+## Alert Integration
+
+Every time a buyer creates (`POST`) or updates (`PUT`) a price, the system automatically checks all active producer alerts:
+
+1. The controller queries `Alerta` for records where `activa: true`, `precioMinimo <= preciocarga`, and the alert's `comprador` either matches the posting buyer or is `null` (watch-all alerts).
+2. For each matching alert with `canales.email: true`, an email is dispatched via Nodemailer with the producer's name, the buyer's company name, the alert threshold, and the actual posted price.
+3. `ultimaNotificacion` is updated on each triggered alert to timestamp the last dispatch.
+
+See [Alerts](/features/alerts) for full configuration details.
+
+<Tip>
+  Producers receive a separate broadcast notification (`notificarProductores`) for every new or updated price — even without a configured alert — as long as they have `rol: productor`, `estado: activo`, and a valid email on file.
+</Tip>

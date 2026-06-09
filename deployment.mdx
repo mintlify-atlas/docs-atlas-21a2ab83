@@ -1,0 +1,262 @@
+---
+title: "Deploy CoffePrice on Railway and Netlify"
+sidebarTitle: "Deployment"
+description: "Step-by-step guide to deploying the CoffePrice backend on Railway and the React frontend on Netlify, including environment variables and Google OAuth configuration."
+---
+
+This guide walks you through a production deployment of CoffePrice. The backend runs as a Railway service, the frontend is served globally from Netlify's CDN, and the ML prediction pipeline runs on a GitHub Actions schedule. Follow the sections in order — the backend must be deployed first so you have its public URL ready for the frontend environment variables.
+
+---
+
+## Architecture at a Glance
+
+```
+GitHub Repository (source of truth)
+        │
+        ├─── push to main ──► Railway auto-deploy
+        │                       Express 5 + MongoDB
+        │                       PORT 8081 (Railway sets $PORT)
+        │                       https://YOUR-BACKEND.up.railway.app
+        │
+        ├─── push to main ──► Netlify auto-deploy
+        │                       React 19 + Vite build
+        │                       https://YOUR-SITE.netlify.app
+        │
+        └─── cron Mon–Fri 20:15 UTC ──► GitHub Actions ML pipeline
+                                         Commits artefacts → triggers
+                                         Railway + Netlify re-deploys
+```
+
+All three tiers stay in sync through git: when the ML pipeline commits updated prediction files, both Railway and Netlify pick up the changes automatically if auto-deploy on push is enabled.
+
+---
+
+## Backend on Railway
+
+<Steps>
+  <Step title="Create a Railway project from the repository">
+    1. Go to [railway.app](https://railway.app) and click **New Project**.
+    2. Choose **Deploy from GitHub repo** and authorize Railway to access your fork or the `JaiderT/CoffeePrice` repository.
+    3. Railway will detect the monorepo structure. When prompted, select **Add a service** and point it to the `backend/` subdirectory.
+  </Step>
+
+  <Step title="Set the start command and root directory">
+    In the service settings (**Settings → Build & Deploy**):
+
+    | Setting | Value |
+    |---------|-------|
+    | Root directory | `backend` |
+    | Start command | `npm start` |
+
+    Railway will run `node server.js` (the `start` script in `backend/package.json`). It will also inject a `PORT` environment variable automatically — the server falls back to `8081` if `PORT` is not set.
+  </Step>
+
+  <Step title="Set required environment variables">
+    Navigate to **Variables** in your Railway service and add at minimum:
+
+    | Variable | Production value |
+    |----------|-----------------|
+    | `MONGODB_URI` | Your MongoDB Atlas SRV connection string |
+    | `JWT_SECRET` | A long, random secret (use `openssl rand -base64 48`) |
+    | `SESSION_SECRET` | A separate long random secret for Passport sessions |
+    | `FRONTEND_URL` | `https://YOUR-SITE.netlify.app` (fill in after Netlify deploy) |
+    | `NODE_ENV` | `production` |
+    | `JWT_EXPIRES_IN` | `1d` (or your preferred duration) |
+
+    <Tip>
+      Set `NODE_ENV=production` before the first deploy. The Express server sets `app.set('trust proxy', 1)` only in production, which is required for Railway's HTTPS proxy to work correctly with cookies.
+    </Tip>
+  </Step>
+
+  <Step title="Set optional environment variables for platform features">
+    Add these variables to unlock the corresponding features:
+
+    | Variable | Feature | Notes |
+    |----------|---------|-------|
+    | `GOOGLE_CLIENT_ID` | Google OAuth login | From Google Cloud Console |
+    | `GOOGLE_CLIENT_SECRET` | Google OAuth login | From Google Cloud Console |
+    | `GOOGLE_CALLBACK_URL` | Google OAuth login | `https://YOUR-BACKEND.up.railway.app/api/auth/google/callback` |
+    | `EMAIL_USER` | Price alert emails | Gmail address or SMTP user |
+    | `EMAIL_PASS` | Price alert emails | App password for the account |
+    | `OPENAI_API_KEY` | AI chatbot (`/api/chatbot`) | OpenAI platform key |
+    | `NEWSAPI_KEY` | News feed | [newsapi.org](https://newsapi.org) key |
+    | `GNEWS_API_KEY` | News feed | [gnews.io](https://gnews.io) key |
+    | `THENEWSAPI_TOKEN` | News feed | [thenewsapi.com](https://www.thenewsapi.com) token |
+    | `NOTICIAS_GENERAR_AL_INICIAR` | News feed | Set `true` to seed articles on first boot |
+
+    See the [Quickstart](/quickstart) page for the full list of `NOTICIAS_*` tuning variables.
+  </Step>
+
+  <Step title="Copy the public Railway URL">
+    Once the deploy succeeds, Railway displays the public domain in **Settings → Networking → Public URL**. It looks like:
+
+    ```
+    https://YOUR-BACKEND.up.railway.app
+    ```
+
+    Save this URL — you will paste it as `VITE_API_URL` in Netlify and as `GOOGLE_CALLBACK_URL` if you use Google OAuth.
+  </Step>
+</Steps>
+
+---
+
+## Frontend on Netlify
+
+<Steps>
+  <Step title="Import the repository and configure the build">
+    1. Go to [app.netlify.com](https://app.netlify.com) and click **Add new site → Import an existing project**.
+    2. Authorize Netlify to access the repository and select it.
+    3. Set the build configuration:
+
+    | Setting | Value |
+    |---------|-------|
+    | Base directory | `frontend` |
+    | Build command | `npm run build` |
+    | Publish directory | `frontend/dist` |
+
+    Alternatively, leave all fields blank and let Netlify read `netlify.toml` from the repository root — it already contains these exact values:
+
+    ```toml
+    [build]
+      base    = "frontend"
+      command = "npm run build"
+      publish = "dist"
+    ```
+  </Step>
+
+  <Step title="Set frontend environment variables">
+    In **Site configuration → Environment variables**, add:
+
+    | Variable | Value |
+    |----------|-------|
+    | `VITE_API_URL` | `https://YOUR-BACKEND.up.railway.app` (the Railway URL from above) |
+    | `VITE_MAPBOX_TOKEN` | Your Mapbox public access token |
+    | `VITE_MAPTILER_KEY` | Your MapTiler API key |
+
+    Vite embeds these values at build time. After adding or changing them you must trigger a new deploy for the changes to take effect.
+  </Step>
+
+  <Step title="SPA routing — already handled by netlify.toml">
+    CoffePrice is a React single-page application. Client-side routes such as `/login`, `/precios`, and `/completar-perfil` must return `index.html` when reloaded directly. The `netlify.toml` in the repository root already includes the required catch-all redirect:
+
+    ```toml
+    [[redirects]]
+      from   = "/*"
+      to     = "/index.html"
+      status = 200
+    ```
+
+    No additional configuration is needed. Netlify applies this rule automatically on every deploy.
+  </Step>
+</Steps>
+
+---
+
+## Google OAuth Configuration
+
+If you enabled Google sign-in by setting `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, you must update the authorized origins and redirect URIs in Google Cloud Console to match your production domains.
+
+1. Open [console.cloud.google.com](https://console.cloud.google.com) and navigate to **APIs & Services → Credentials**.
+2. Click your OAuth 2.0 Client ID.
+3. Under **Authorized JavaScript origins**, add:
+   - `https://YOUR-SITE.netlify.app`
+   - `https://YOUR-BACKEND.up.railway.app`
+4. Under **Authorized redirect URIs**, add:
+   - `https://YOUR-BACKEND.up.railway.app/api/auth/google/callback`
+5. Click **Save** and wait a few minutes for the change to propagate.
+6. Make sure `GOOGLE_CALLBACK_URL` in your Railway environment variables matches the redirect URI exactly.
+
+<Tip>
+  Keep `http://localhost:8081/api/auth/google/callback` in the authorized redirect URIs list alongside the production URL so you can still test OAuth locally without switching credentials.
+</Tip>
+
+---
+
+## ML Pipeline Automation
+
+The price prediction pipeline is driven by a GitHub Actions workflow at `.github/workflows/actualizar-predicciones.yml`. No additional hosting or server is required.
+
+**Schedule:** The workflow runs automatically **Monday through Friday at 20:15 UTC** (3:15 pm Colombia time, UTC−5).
+
+**What it does:**
+
+1. Checks out the repository with full history (`fetch-depth: 0`).
+2. Sets up Python 3.11 and installs dependencies from `ml-service-experimental/requirements_hibrido.txt`.
+3. Runs `python ml-service-experimental/actualizar_todo.py`, which fetches the latest FNC price data, retrains the Prophet + XGBoost hybrid model, and generates the next business-day prediction.
+4. Commits the updated artefacts back to the repository:
+   - `backend/datos/` — prediction JSON files served by `/api/predicciones`
+   - `ml-service-experimental/datos/` — raw data snapshots
+   - `ml-service-experimental/modelos/metricas_fnc_hibrido.json` — model metrics
+
+5. Pushes the commit, which triggers Railway and Netlify auto-deploys if connected.
+
+**Manual trigger:** You can also run the workflow on demand from the **Actions** tab in GitHub without touching your local machine — click the workflow name, then **Run workflow**.
+
+**Requirements for full automation:**
+
+- The repository must be connected to Railway and Netlify with **auto-deploy on push** enabled.
+- GitHub Actions must be enabled for the repository (it is by default for public repos).
+- To change the run time, update the `cron` expression in the workflow file (values are in UTC).
+
+---
+
+## Verification
+
+After both services are live, run these checks:
+
+**Backend health check:**
+
+```bash
+curl https://YOUR-BACKEND.up.railway.app/healthz
+```
+
+Expected response (HTTP 200):
+
+```json
+{
+  "status": "ok",
+  "service": "backend",
+  "db": "connected"
+}
+```
+
+If you get HTTP 503 with `"status": "degraded"`, MongoDB Atlas has not yet accepted the connection. Double-check `MONGODB_URI` and ensure your Atlas cluster's Network Access allows connections from `0.0.0.0/0` (all IPs) since Railway uses dynamic outbound IPs.
+
+**Backend root:**
+
+```bash
+curl https://YOUR-BACKEND.up.railway.app/
+```
+
+```json
+{
+  "status": "ok",
+  "message": "Backend CoffePrice activo",
+  "api": "/api"
+}
+```
+
+**Frontend routes:**
+
+1. Open `https://YOUR-SITE.netlify.app` — the home page should load.
+2. Navigate to `/login` then press F5 to reload — the page should still render (SPA redirect working).
+3. Navigate to `/precios` — the price chart should appear and fetch data from Railway.
+4. Try Google login if OAuth is configured.
+
+---
+
+## Recommended Deployment Order
+
+1. Deploy the **backend** to Railway first and wait for it to be healthy (`/healthz` returns `ok`).
+2. Copy the Railway public URL.
+3. Set `VITE_API_URL` in Netlify environment variables to that URL.
+4. Deploy the **frontend** to Netlify.
+5. Go back to Railway and confirm `FRONTEND_URL` is set to the live Netlify domain.
+6. If using Google OAuth, update the authorized URIs in Google Cloud Console.
+7. Enable **auto-deploy on push** in both Railway and Netlify so that the nightly ML pipeline commit triggers a re-deploy automatically.
+
+---
+
+<Warning>
+  **Cookies require HTTPS in production.** The backend sets JWT cookies with `SameSite=None` in production mode so they are sent cross-origin (Railway domain → Netlify domain). Browsers only allow `SameSite=None` on cookies that also have the `Secure` flag, which means both the backend and the frontend **must** be served over HTTPS. Railway and Netlify both provision TLS automatically, but if you place any custom domain in front of either service, ensure TLS is terminated correctly before traffic reaches the app.
+</Warning>

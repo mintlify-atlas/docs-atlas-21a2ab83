@@ -1,0 +1,174 @@
+---
+title: "Buyer (Comprador) Role in CoffePrice"
+sidebarTitle: "Buyer"
+description: "Buyers (compradores) register on CoffePrice to publish their coffee purchase prices, appear on the regional map, and connect with producers. Admin approval is required."
+---
+
+The **comprador** role is designed for coffee buyers — cooperatives, processing mills, and independent traders — who want to advertise their purchase prices to Colombian coffee farmers in the Huila region. Unlike producers, buyer accounts go through an admin approval step before they can publish prices or appear on the public map. This ensures that only legitimate, verified buyers are visible to the farming community.
+
+<Warning>
+  New buyer registrations **cannot publish prices or appear on the map** until an administrator has reviewed and approved the buyer profile. If your account is stuck in `pendiente`, check your email for a decision notification or contact the platform admin.
+</Warning>
+
+## Registration and Approval Flow
+
+<Steps>
+  <Step title="Create a user account">
+    Register at `/register` and select **Comprador** as your role. Your user `estado` is set to `pendiente` immediately after registration.
+  </Step>
+  <Step title="Verify your email">
+    Enter the 6-digit code sent to your email to confirm your address. This step is required before you can proceed.
+  </Step>
+  <Step title="Complete your buyer profile">
+    You are redirected to `/completar-perfil`. Fill in your company details (see [Profile Fields](#buyer-profile-fields) below). Submitting this form calls `POST /api/comprador` and creates your buyer record with `estadoRevision: "en_revision"`. An email notification is automatically sent to all active admins.
+  </Step>
+  <Step title="Wait for admin review">
+    An admin reviews your profile. The `estadoRevision` moves from `en_revision` to either `aprobado` or `rechazado`. You receive an email with the decision.
+  </Step>
+  <Step title="Access your dashboard">
+    Once approved, your user `estado` becomes `activo` and you can access `/comprador/dashboard`, publish prices, and appear on the buyer map.
+  </Step>
+</Steps>
+
+## Buyer Profile Fields
+
+When completing your profile at `/completar-perfil`, you provide the following information:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `nombreempresa` | String | ✅ | Legal or trade name of your business (letters, spaces, `.` and `&` only) |
+| `tipoempresa` | String | — | Business type: `independiente`, or your applicable category |
+| `municipio` | String | — | One of the 10 supported Huila municipalities (see list below) |
+| `direccion` | String | ✅ | Physical address of your buying point |
+| `telefono` | String | ✅ | Contact phone number |
+| `horarioApertura` | String | — | Opening time, e.g. `"07:00"` |
+| `horarioCierre` | String | — | Closing time, e.g. `"17:00"` |
+| `descripcion` | String | — | Brief description of your business |
+| `servicios` | String[] | — | List of services offered |
+
+### Supported Municipalities
+
+The platform covers the following municipalities in the department of Huila:
+
+<Tabs>
+  <Tab title="List">
+    - El Pital
+    - Pitalito
+    - Acevedo
+    - La Argentina
+    - Tarqui
+    - Suaza
+    - Palestina
+    - Elías
+    - Saladoblanco
+    - Isnos
+  </Tab>
+  <Tab title="Map coordinates (approximate centres)">
+    ```json
+    {
+      "el pital":      [2.266205, -75.805401],
+      "pitalito":      [1.8537,   -76.0517],
+      "acevedo":       [1.8043,   -75.8893],
+      "la argentina":  [2.1962,   -75.9805],
+      "tarqui":        [2.1107,   -75.8238],
+      "suaza":         [1.9767,   -75.7947],
+      "palestina":     [1.7238,   -76.1347],
+      "elias":         [2.0131,   -75.9395],
+      "saladoblanco":  [1.9933,   -76.0457],
+      "isnos":         [1.9270,   -76.2148]
+    }
+    ```
+    Buyer pins on the map are placed at a deterministic offset from the municipality centre to provide a general location without revealing the exact address.
+  </Tab>
+</Tabs>
+
+## estadoRevision Lifecycle
+
+The `estadoRevision` field on the buyer record tracks where the profile is in the approval workflow:
+
+```
+[Registration] → en_revision → aprobado
+                             → rechazado
+```
+
+| estadoRevision | Meaning |
+|----------------|---------|
+| `en_revision` | Profile submitted, awaiting admin decision |
+| `aprobado` | Admin approved — buyer is visible on the map and can publish prices |
+| `rechazado` | Admin rejected — buyer cannot publish prices; a reason may be provided |
+
+When a buyer is rejected, the `motivoRevision` field stores the reason. If the buyer resubmits or the issue is resolved, the admin can update `estadoRevision` back to `aprobado` via `PUT /api/comprador/:id`.
+
+## What Approved Buyers Can Do
+
+Once `estadoRevision` is `aprobado` and user `estado` is `activo`, buyers can:
+
+- **Publish purchase prices** — post the price they are currently offering per carga or per kg for specific coffee types.
+- **Update or remove prices** — keep their listed prices current throughout the trading day.
+- **Appear on the regional map** — their pin is shown on the public buyer map at `/mapa` with a general location.
+- **Manage their company profile** — update business details, schedule, and services via `PUT /api/comprador/:id`.
+- **View their dashboard** — access analytics and price management tools at `/comprador/dashboard`.
+
+### Publishing Prices
+
+`POST /api/precios` — publish a purchase price for a specific coffee type.
+
+```json
+{
+  "tipocafe": "pergamino_seco",
+  "preciocarga": 1100000,
+  "preciokg": 16923,
+  "unidad": "carga"
+}
+```
+
+Supported coffee types (`tipocafe`):
+
+| Value | Description |
+|-------|-------------|
+| `pergamino_seco` | Dry parchment coffee |
+| `especial` | Specialty coffee |
+| `organico` | Organic certified coffee |
+| `verde` | Green (unroasted) coffee |
+| `pasilla` | Lower-grade sorted coffee |
+| `cacao` | Cacao (also traded on the platform) |
+| `limon` | Lemon/citrus (complementary crop) |
+
+Prices are denominated in **Colombian Pesos (COP)**.
+
+## Privacy Model
+
+Contact details are deliberately restricted to protect buyer privacy and maintain fair competition:
+
+| Information | Producers & public | Buyer (own profile) | Admin |
+|-------------|-------------------|---------------------|-------|
+| Company name | ✅ Visible | ✅ Visible | ✅ Visible |
+| Municipality (general area) | ✅ Visible | ✅ Visible | ✅ Visible |
+| Exact address | ❌ Hidden | ✅ Visible | ✅ Visible |
+| Phone number | ❌ Hidden | ✅ Visible | ✅ Visible |
+| Business hours | ✅ Visible | ✅ Visible | ✅ Visible |
+| estadoRevision | ❌ Hidden | ✅ Visible | ✅ Visible |
+
+The API response for unauthenticated users and producers uses `sanitizarCompradorPublico()`, which sets `direccion: null`, `telefono: null`, and `contactoRestringido: true`. Only the owner or an admin receives the full document.
+
+## Frontend Routes
+
+| Route | Component | Description |
+|-------|-----------|-------------|
+| `/completar-perfil` | `CompletarPerfil` | Buyer profile completion (post-registration) |
+| `/comprador/dashboard` | `DashboardComprador` | Buyer dashboard — price management and stats |
+| `/comprador/perfil` | `PerfilComprador` | Edit company profile and account settings |
+| `/mapa` | `MapaCompradores` | Interactive map of approved buyers |
+
+## API Endpoints
+
+| Endpoint | Method | Auth required | Description |
+|----------|--------|---------------|-------------|
+| `/api/comprador` | POST | ✅ `comprador` | Create buyer profile |
+| `/api/comprador/usuario/:usuarioId` | GET | ✅ Owner or admin | Get own buyer profile |
+| `/api/comprador/mapa` | GET | Public | Approved buyers for the map |
+| `/api/comprador/:id` | GET | Optional | Public sanitised view of a buyer |
+| `/api/comprador/:id` | PUT | ✅ Owner or admin | Update buyer profile |
+| `/api/precios` | POST | ✅ `comprador` (approved) | Publish a purchase price |
+| `/api/precios/:id` | PUT | ✅ Owner | Update a published price |
+| `/api/precios/:id` | DELETE | ✅ Owner | Remove a published price |

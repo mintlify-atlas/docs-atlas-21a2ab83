@@ -1,0 +1,142 @@
+---
+title: "Price Alerts and Email Notifications"
+sidebarTitle: "Alerts"
+description: "Set a minimum price threshold in CoffePrice and receive an email whenever any buyer posts a price at or above that level. Alerts are tied to specific buyers or all buyers."
+---
+
+Price alerts let coffee producers stop manually refreshing the price board. Set a minimum price threshold once, and CoffePrice will send you an email the moment any buyer (or a specific buyer you choose) publishes a price at or above your target. Alerts work passively in the background — every time a buyer creates or updates a price record, the system checks all active alerts automatically.
+
+## How Alerts Work
+
+<Steps>
+  <Step title="Producer creates an alert">
+    A producer sets `precioMinimo` (the minimum price they want to be notified about) and optionally pins the alert to a single `comprador` ID. If `comprador` is `null`, the alert watches **all buyers** in the system.
+  </Step>
+  <Step title="Buyer posts or updates a price">
+    When a buyer calls `POST /api/precios` or `PUT /api/precios/:id`, the price controller calls `verificarAlertas(compradorId, preciocarga)` synchronously.
+  </Step>
+  <Step title="System matches alerts">
+    The backend queries for active alerts where:
+    - `activa: true`
+    - `precioMinimo <= preciocarga` (the posted price meets or exceeds the threshold)
+    - `comprador` either equals the posting buyer's ID **or** is `null` (catch-all)
+  </Step>
+  <Step title="Email notification dispatched">
+    For each matched alert where `canales.email: true` and the user has a valid email address, the system sends a transactional email via **Nodemailer** containing:
+    - Producer's full name
+    - Buyer's company name (`nombreempresa`)
+    - The alert's minimum price threshold
+    - The actual price just posted
+
+    `ultimaNotificacion` is updated to `new Date()` on each trigger.
+  </Step>
+</Steps>
+
+## Alert Fields
+
+| Field                | Type      | Required | Description                                                                 |
+|----------------------|-----------|----------|-----------------------------------------------------------------------------|
+| `usuario`            | ObjectId  | ✅        | Reference to the producer (`usuario` collection) who owns this alert        |
+| `comprador`          | ObjectId  | ❌        | Pin alert to a specific buyer; `null` = watch all buyers                   |
+| `precioMinimo`       | number    | ✅        | Minimum price (COP/carga) that triggers notification                        |
+| `activa`             | boolean   | —        | Whether the alert is active. Default: `true`                                |
+| `canales.email`      | boolean   | —        | Send email notifications. Default: `false`                                  |
+| `canales.whatsapp`   | boolean   | —        | WhatsApp channel (future). Default: `true`                                  |
+| `canales.sms`        | boolean   | —        | SMS channel (future). Default: `false`                                      |
+| `canales.push`       | boolean   | —        | Push notification channel. Default: `true`                                  |
+| `ultimaNotificacion` | Date      | —        | Timestamp of the last triggered notification. Default: `null`               |
+
+<Note>
+  Set `canales.email: true` when creating or updating an alert to receive email notifications. The other channel flags (`whatsapp`, `sms`, `push`) are reserved for future delivery channels and do not currently send messages.
+</Note>
+
+## Toggling an Alert On/Off
+
+Producers can pause and resume an alert without deleting it:
+
+```bash
+PUT /api/alertas/:id/toggle
+```
+
+This endpoint flips the `activa` boolean. A paused alert (`activa: false`) is excluded from all buyer-price checks until re-activated.
+
+## Role Restriction
+
+Only users with the `productor` or `admin` role can access the alerts API. Buyers (`comprador` role) cannot create or view alerts.
+
+| Route                                   | Roles              |
+|-----------------------------------------|--------------------|
+| `GET /api/alertas/usuario/:usuarioId`   | productor, admin   |
+| `GET /api/alertas/:id`                  | productor, admin   |
+| `POST /api/alertas`                     | productor, admin   |
+| `PUT /api/alertas/:id`                  | productor, admin   |
+| `PUT /api/alertas/:id/toggle`           | productor, admin   |
+| `DELETE /api/alertas/:id`               | productor, admin   |
+
+## Spam Prevention
+
+`ultimaNotificacion` is recorded every time an alert fires. The `/api/alertas/verificar/:usuarioId` endpoint returns only alerts that triggered within the **last 60 seconds** — this is used by the frontend to display real-time notification badges without polling MongoDB continuously.
+
+<Warning>
+  There is currently no cooldown between consecutive triggers for the same alert. If a buyer updates their price multiple times in rapid succession and `activa: true` with `canales.email: true`, each update will send a separate email. Consider setting a meaningful `precioMinimo` buffer above the current market price to avoid noise.
+</Warning>
+
+## CRUD Summary
+
+For the full request/response schema of each endpoint, see the [API → Alerts](/api/alerts) reference.
+
+<CardGroup cols={2}>
+  <Card title="Create Alert" icon="bell-plus">
+    `POST /api/alertas` — Send `{ precioMinimo, comprador?, canales }` in the request body. The `usuario` field is inferred from the authenticated JWT.
+  </Card>
+  <Card title="Update Alert" icon="bell-concierge">
+    `PUT /api/alertas/:id` — Update any mutable field: `precioMinimo`, `comprador`, `canales`, or `activa`.
+  </Card>
+  <Card title="Toggle Alert" icon="toggle-on">
+    `PUT /api/alertas/:id/toggle` — Flip `activa` without modifying any other fields.
+  </Card>
+  <Card title="Delete Alert" icon="bell-slash">
+    `DELETE /api/alertas/:id` — Permanently removes the alert. Ownership or admin role required.
+  </Card>
+</CardGroup>
+
+## Example: Creating an Alert
+
+```bash
+curl -X POST https://api.coffeprice.com/api/alertas \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "precioMinimo": 2300000,
+    "comprador": null,
+    "canales": {
+      "email": true,
+      "push": true
+    }
+  }'
+```
+
+**Example response:**
+
+```json
+{
+  "_id": "664b3f009b3c4d001e8f0020",
+  "usuario": "664a0001abc123def4560001",
+  "comprador": null,
+  "precioMinimo": 2300000,
+  "activa": true,
+  "canales": {
+    "whatsapp": true,
+    "sms": false,
+    "email": true,
+    "push": true
+  },
+  "ultimaNotificacion": null,
+  "createdAt": "2025-06-01T10:00:00.000Z",
+  "updatedAt": "2025-06-01T10:00:00.000Z"
+}
+```
+
+<Tip>
+  Set `comprador: null` to watch all buyers — this is the most common configuration for producers who want to capture the best market price regardless of source. Pin to a specific `comprador` ID if you have a preferred buyer and only want to be notified when they meet your threshold.
+</Tip>

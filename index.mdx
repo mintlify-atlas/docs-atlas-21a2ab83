@@ -1,20 +1,68 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "CoffePrice: Real-Time Coffee Price Intelligence for Colombia"
+sidebarTitle: "Home"
+description: "CoffePrice helps Colombian coffee farmers and buyers track real-time FNC prices, view AI-powered predictions, find buyers on an interactive map, and set price alerts."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+CoffePrice is a full-stack SaaS platform built for Colombia's coffee supply chain. Farmers (caficultores) get live FNC reference prices, ML-driven next-day predictions, and email alerts when prices hit their target. Buyers (compradores) publish their prices and appear on a regional map. Admins oversee users, news, and platform configuration.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Set up your local environment and run CoffePrice in minutes
+  </Card>
+  <Card title="Deployment" icon="server" href="/deployment">
+    Deploy the backend on Railway and the frontend on Netlify
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth/overview">
+    Explore every REST endpoint — auth, prices, predictions, and more
+  </Card>
+  <Card title="ML Pipeline" icon="brain" href="/ml/overview">
+    Learn how the hybrid Prophet + XGBoost model generates daily predictions
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What CoffePrice does
+
+CoffePrice aggregates the data Colombian coffee producers need every day — the FNC internal price, the New York futures benchmark, the COP/USD exchange rate, and regional buyer prices — and packages it into a single platform with three distinct dashboards for producers, buyers, and administrators.
+
+<CardGroup cols={3}>
+  <Card title="Live Prices" icon="dollar-sign" href="/features/prices">
+    FNC price scraped Mon–Fri at 8 am and 1 pm (Bogotá time)
+  </Card>
+  <Card title="Predictions" icon="chart-line" href="/features/predictions">
+    Next-day FNC price forecast with confidence range and trend signal
+  </Card>
+  <Card title="Buyer Map" icon="map-pin" href="/features/buyer-map">
+    Interactive map of approved buyers across Huila municipalities
+  </Card>
+  <Card title="Price Alerts" icon="bell" href="/features/alerts">
+    Email notification when any buyer posts a price above your threshold
+  </Card>
+  <Card title="News Feed" icon="newspaper" href="/features/news">
+    Auto-aggregated coffee-sector news refreshed multiple times a day
+  </Card>
+  <Card title="Kaffi Chatbot" icon="robot" href="/features/chatbot">
+    OpenAI-powered assistant that answers questions about the platform
+  </Card>
+</CardGroup>
+
+## Get started
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone `JaiderT/CoffeePrice` and install dependencies for both the `backend` and `frontend` directories.
+  </Step>
+  <Step title="Configure environment variables">
+    Copy `backend/.env.example` to `backend/.env` and fill in `MONGODB_URI`, `JWT_SECRET`, and `FRONTEND_URL` at minimum.
+  </Step>
+  <Step title="Start the backend">
+    Run `npm start` (or `npm run dev` for hot-reload) from the `backend/` directory. The API listens on port 8081 by default.
+  </Step>
+  <Step title="Start the frontend">
+    Set `VITE_API_URL` in `frontend/.env`, then run `npm run dev` from the `frontend/` directory. Open `http://localhost:5173`.
+  </Step>
+</Steps>
+
+<Note>
+  The ML prediction pipeline (`ml-service-experimental/`) runs separately as a Python script. In production it executes automatically via a GitHub Actions workflow every weekday at 3:15 pm Colombia time.
+</Note>

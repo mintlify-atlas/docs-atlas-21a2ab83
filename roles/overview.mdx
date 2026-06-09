@@ -1,0 +1,128 @@
+---
+title: "User Roles and Permissions in CoffePrice"
+sidebarTitle: "Overview"
+description: "CoffePrice has three roles: productor (farmer), comprador (buyer), and admin. Each role has a dedicated dashboard and access to a distinct set of features and API endpoints."
+---
+
+CoffePrice is built around three distinct user roles — **productor**, **comprador**, and **admin** — each with its own dashboard, access level, and workflow. Understanding which role you belong to determines what you can see, what API endpoints you can call, and what account states apply to your registration. This page explains the full permission model so you can navigate the platform with confidence.
+
+## Roles at a Glance
+
+| Role | Description | Estado on registration | Dashboard route |
+|------|-------------|------------------------|-----------------|
+| `productor` | Coffee farmer who tracks prices, predictions, and alerts | `activo` immediately | `/dashboard` |
+| `comprador` | Coffee buyer who publishes purchase prices and appears on the regional map | `pendiente` until admin approves | `/comprador/dashboard` |
+| `admin` | Platform administrator who manages users, news, reviews, and configuration | N/A (created directly) | `/admin/dashboard` |
+
+## Account States
+
+Every user account carries an `estado` field that controls what actions the user can take. The five possible values are:
+
+| Estado | Meaning | Effect |
+|--------|---------|--------|
+| `activo` | Account is fully active | Full access to all routes permitted for the role |
+| `pendiente` | Account is awaiting review or email verification | Compradores in this state can only access `/api/comprador` and auth endpoints |
+| `rechazado` | Registration was rejected by an admin | Access is blocked; only logout and `/api/auth/me` are reachable |
+| `eliminado` | Account has been soft-deleted | All protected routes return `403`; account no longer appears in listings |
+| `suspendido` | Account was voluntarily suspended by the user | Blocked from all routes except reactivation (`/api/usuario/reactivar`) and logout |
+
+A suspended user can self-reactivate via `PUT /api/usuario/reactivar` without admin intervention. A rejected or eliminated user must contact an admin.
+
+## How Authentication Works
+
+CoffePrice uses **JWT-based authentication**. The token is issued at login and stored as an HTTP-only cookie named `auth_token`. For API clients that cannot use cookies, the token can also be sent in the `Authorization` header as a Bearer token.
+
+<Tabs>
+  <Tab title="Cookie (default)">
+    ```http
+    Cookie: auth_token=<jwt>
+    ```
+    This is the default for the browser-based frontend. The cookie is set automatically on login and cleared on logout.
+  </Tab>
+  <Tab title="Authorization header">
+    ```http
+    Authorization: Bearer <jwt>
+    ```
+    Use this approach for mobile clients, server-to-server calls, or any context where cookies are not available.
+  </Tab>
+</Tabs>
+
+### authMiddleware
+
+`authMiddleware.js` runs on every protected route. It:
+
+1. Reads the JWT from `req.cookies.auth_token`, then falls back to `req.headers.authorization`.
+2. Verifies the token against `JWT_SECRET` and fetches the live `_id`, `rol`, and `estado` from the database.
+3. Attaches `req.user = { id, rol, estado }` for downstream middleware and controllers.
+4. Returns `401` if the token is missing, invalid, or expired.
+5. Returns `403` if the user's `estado` is `rechazado`, `eliminado`, or `suspendido` and the requested route is not on the allow-list for that state.
+
+### rolMiddleware
+
+`rolMiddleware.js` is a factory that accepts one or more role strings and produces an Express middleware:
+
+```js
+// Only admins may access this route
+router.get("/", authMiddleware, rolMiddleware("admin"), getusuario);
+
+// Both compradores and admins may access this route
+router.put("/:id", authMiddleware, updatecomprador);
+```
+
+It reads `req.user.rol` (set by `authMiddleware`) and returns `403` if the role is not in the permitted list.
+
+## Route Protection Overview
+
+The table below summarises which role and estado combination is required for the most important API endpoints.
+
+| Endpoint | Method | Required role | Notes |
+|----------|--------|---------------|-------|
+| `/api/auth/login` | POST | Public | — |
+| `/api/auth/register` | POST | Public | — |
+| `/api/auth/me` | GET | Any authenticated | Works for all estados |
+| `/api/auth/logout` | POST | Any authenticated | Works for all estados |
+| `/api/usuario` | GET | `admin` | Lists all users |
+| `/api/usuario/:id/estado` | PUT | `admin` | Change any user's estado |
+| `/api/usuario/:id/actualizar` | PUT | `admin` | Update any user's data |
+| `/api/usuario/:id` | DELETE | `admin` | Soft-delete a user |
+| `/api/usuario/perfil` | PUT | Any authenticated, `activo` | Self-service profile update |
+| `/api/usuario/password` | PUT | Any authenticated, `activo` | Self-service password change |
+| `/api/usuario/suspender` | PUT | Any authenticated | Self-suspend own account |
+| `/api/usuario/reactivar` | PUT | `suspendido` user | Reactivate own account |
+| `/api/comprador` | GET | `admin` | Lists all buyers |
+| `/api/comprador` | POST | `comprador` | Create buyer profile |
+| `/api/comprador/mapa` | GET | Public | Approved buyers only |
+| `/api/comprador/:id` | PUT | Owner or `admin` | Update buyer profile |
+| `/api/comprador/:id` | DELETE | `admin` | Delete buyer |
+| `/api/precios` | GET | Public | FNC and buyer prices |
+| `/api/predicciones` | GET | Authenticated | Next-day FNC prediction |
+| `/api/alertas/usuario/:id` | GET | Owner | Own alerts |
+| `/api/alertas` | POST | `productor` | Create price alert |
+| `/api/noticias` | POST | `admin` | Create news article |
+| `/api/configuracion` | PUT | `admin` | Update platform settings |
+
+## Learn More About Each Role
+
+<CardGroup cols={3}>
+  <Card
+    title="Producer"
+    icon="seedling"
+    href="/roles/producer"
+  >
+    How caficultores register, track prices, set alerts, and manage their accounts.
+  </Card>
+  <Card
+    title="Buyer"
+    icon="store"
+    href="/roles/buyer"
+  >
+    How compradores register, complete their profile, publish prices, and appear on the map.
+  </Card>
+  <Card
+    title="Admin"
+    icon="shield-halved"
+    href="/roles/admin"
+  >
+    How admins approve buyers, manage users, moderate content, and configure the platform.
+  </Card>
+</CardGroup>

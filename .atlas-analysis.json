@@ -1,0 +1,142 @@
+{
+  "projectType": "saas",
+  "projectName": "CoffePrice",
+  "projectDescription": "A full-stack SaaS platform for Colombian coffee farmers and buyers to track real-time FNC coffee prices, view AI-powered price predictions, discover buyers on an interactive map, and receive price-threshold alerts.",
+  "theme": "almond",
+  "primaryColor": "#6B3C1E",
+  "lightColor": "#F5DFC0",
+  "darkColor": "#3D1F0D",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Overview",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "deployment"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/prices",
+              "features/predictions",
+              "features/buyer-map",
+              "features/alerts",
+              "features/news",
+              "features/chatbot"
+            ]
+          },
+          {
+            "group": "User Roles",
+            "pages": [
+              "roles/overview",
+              "roles/producer",
+              "roles/buyer",
+              "roles/admin"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth/overview",
+              "api/auth/register",
+              "api/auth/login",
+              "api/auth/google-oauth"
+            ]
+          },
+          {
+            "group": "Prices & Predictions",
+            "pages": [
+              "api/prices",
+              "api/predictions",
+              "api/price-history"
+            ]
+          },
+          {
+            "group": "Buyers & Map",
+            "pages": [
+              "api/buyers",
+              "api/buyer-map"
+            ]
+          },
+          {
+            "group": "Users & Alerts",
+            "pages": [
+              "api/users",
+              "api/alerts",
+              "api/news",
+              "api/chatbot"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "ML Pipeline",
+        "groups": [
+          {
+            "group": "Price Prediction Model",
+            "pages": [
+              "ml/overview",
+              "ml/data-sources",
+              "ml/training",
+              "ml/automation"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time FNC coffee price scraping (Mon–Fri, 8am & 1pm Bogotá time) with NY futures fallback",
+    "Hybrid ML price prediction model combining Prophet, XGBoost, naive, and formula-based strategies",
+    "Interactive buyer map showing coffee buyers across Huila municipalities with approximate coordinates",
+    "Role-based access control: producer (caficultor), buyer (comprador), and admin roles",
+    "Configurable price threshold alerts with email notifications for producers",
+    "AI-powered news aggregation and auto-generation via OpenAI + multiple news APIs",
+    "Kaffi chatbot assistant powered by OpenAI for user guidance",
+    "Google OAuth + JWT authentication with email verification",
+    "GitHub Actions workflow for automated daily ML pipeline execution",
+    "Deployable on Railway (backend) + Netlify (frontend)"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login",
+    "POST /api/auth/register",
+    "POST /api/auth/verify-email",
+    "GET /api/auth/me",
+    "POST /api/auth/logout",
+    "GET /api/auth/google",
+    "GET /api/precios",
+    "GET /api/precios/comprador/:compradorId",
+    "POST /api/precios",
+    "PUT /api/precios/:id",
+    "DELETE /api/precios/:id",
+    "GET /api/predicciones",
+    "GET /api/predicciones/ultima",
+    "GET /api/predicciones/resumen",
+    "GET /api/predicciones/rango?dias=7|15|30",
+    "GET /api/predicciones/dia?offset=1|7|15|30",
+    "GET /api/predicciones/fecha?fecha=YYYY-MM-DD",
+    "GET /api/noticias",
+    "GET /api/noticias/:id",
+    "GET /api/comprador/mapa",
+    "GET /api/comprador/:id",
+    "GET /api/alertas/usuario/:usuarioId",
+    "POST /api/alertas",
+    "PUT /api/alertas/:id/toggle",
+    "GET /api/historial-precios",
+    "GET /api/historial-precios/comprador/:compradorId",
+    "POST /api/chatbot",
+    "GET /api/clima",
+    "POST /api/contacto",
+    "GET /healthz"
+  ]
+}

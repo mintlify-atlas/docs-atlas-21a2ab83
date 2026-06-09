@@ -1,0 +1,210 @@
+---
+title: "Price History API — Buyer Price Records"
+sidebarTitle: "Price History"
+description: "GET /api/historial-precios returns a time-series log of all buyer price changes. Requires authentication. Supports filtering by buyer ID."
+---
+
+The Price History API provides a time-series audit log of every price that has been published or modified by a buyer on the platform. History records are immutable snapshots — they are never edited or deleted by the application. Two endpoints are available: a global listing with optional filters, and a buyer-scoped listing.
+
+**Base URL:** `/api/historial-precios`
+
+**Authentication:** Required for all endpoints. Include a valid `Authorization: Bearer <token>` header on every request.
+
+### How history records are created
+
+A new `HistorialPrecio` document is written automatically in two scenarios:
+
+1. **`POST /api/precios`** — a snapshot of the newly created price is saved immediately after the price document is inserted.
+2. **`PUT /api/precios/:id`** — a snapshot of the updated price is saved immediately after the price document is modified.
+
+History records are never created by the history endpoints themselves. They are a passive side-effect of the price write operations.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/historial-precios` | Required | List all price history records |
+| GET | `/api/historial-precios/comprador/:compradorId` | Required | List history records for a specific buyer |
+
+---
+
+## GET /api/historial-precios
+
+Returns up to the 100 most recent price history records across all buyers, sorted by `createdAt` descending. Supports optional query-parameter filtering.
+
+**Authentication:** Required.
+
+### Query parameters
+
+<ParamField query="compradorId" type="string">
+  Filter results to a specific buyer by their MongoDB ObjectId. When provided, only records where `comprador` matches this ID are returned.
+</ParamField>
+
+<ParamField query="tipocafe" type="string">
+  Filter results by coffee type. When provided, only records matching this type are returned.
+
+  Allowed values: `pergamino_seco`, `especial`, `organico`, `verde`, `pasilla`, `cacao`, `limon`
+</ParamField>
+
+### Response
+
+An array of up to 100 history objects, sorted newest first. Each object contains the full buyer sub-document populated with `nombreempresa` and `direccion`.
+
+### Response fields
+
+<ResponseField name="_id" type="string">
+  MongoDB ObjectId of the history record.
+</ResponseField>
+
+<ResponseField name="comprador" type="object">
+  Populated buyer reference. Contains `_id`, `nombreempresa`, and `direccion`.
+
+  <Expandable title="comprador object">
+    <ResponseField name="_id" type="string">
+      MongoDB ObjectId of the buyer (`comprador`) document.
+    </ResponseField>
+
+    <ResponseField name="nombreempresa" type="string">
+      Registered business name of the buyer at the time the snapshot was taken.
+    </ResponseField>
+
+    <ResponseField name="direccion" type="string">
+      Physical address of the buyer at the time the snapshot was taken.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="preciocarga" type="number">
+  Price per load (or per kg, for kg-unit types) recorded in this snapshot.
+</ResponseField>
+
+<ResponseField name="preciokg" type="number">
+  Derived price per kilogram at the time the snapshot was taken. For carga-based types, this is `preciocarga / 125`. For kg-based types (`pasilla`, `cacao`, `limon`), this equals `preciocarga`.
+</ResponseField>
+
+<ResponseField name="tipocafe" type="string">
+  Coffee or product type recorded in this snapshot. One of `pergamino_seco`, `especial`, `organico`, `verde`, `pasilla`, `cacao`, `limon`.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string (ISO 8601)">
+  Timestamp when this history record was created. Because records are never modified, `createdAt` is also the effective timestamp of the price change event.
+</ResponseField>
+
+### Example request
+
+```bash
+curl https://api.coffeprice.com/api/historial-precios \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example request with filters
+
+```bash
+curl "https://api.coffeprice.com/api/historial-precios?tipocafe=pergamino_seco&compradorId=664f8c1a2b3d4e5f6a7b8c9d" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example response
+
+```json
+[
+  {
+    "_id": "665c3d4e5f6a7b8c9d0e1f20",
+    "comprador": {
+      "_id": "664f8c1a2b3d4e5f6a7b8c9d",
+      "nombreempresa": "Café del Sur S.A.S.",
+      "direccion": "Calle 10 # 5-32, Pitalito, Huila"
+    },
+    "preciocarga": 1900000,
+    "preciokg": 15200,
+    "tipocafe": "pergamino_seco",
+    "createdAt": "2024-06-01T10:42:00.000Z"
+  },
+  {
+    "_id": "665c3d4e5f6a7b8c9d0e1f10",
+    "comprador": {
+      "_id": "664f8c1a2b3d4e5f6a7b8c9d",
+      "nombreempresa": "Café del Sur S.A.S.",
+      "direccion": "Calle 10 # 5-32, Pitalito, Huila"
+    },
+    "preciocarga": 1850000,
+    "preciokg": 14800,
+    "tipocafe": "pergamino_seco",
+    "createdAt": "2024-06-01T08:00:00.000Z"
+  }
+]
+```
+
+---
+
+## GET /api/historial-precios/comprador/:compradorId
+
+Returns all history records for a single buyer, sorted by `createdAt` descending. Unlike the global endpoint, this route has no 100-record cap — it returns the full history for the buyer.
+
+**Authentication:** Required.
+
+### Path parameters
+
+<ParamField path="compradorId" type="string" required>
+  MongoDB ObjectId of the buyer whose price history you want to retrieve.
+</ParamField>
+
+### Response
+
+An array of history objects for the specified buyer, sorted newest first. Each record's `comprador` field is populated with `nombreempresa` only (no `direccion`).
+
+### Response fields
+
+Same schema as the global endpoint. See [Response fields](#response-fields) above.
+
+### Responses
+
+| Status | Description |
+|--------|-------------|
+| 200 | Array of history records. Empty array `[]` if the buyer has no history. |
+| 500 | Internal server error. |
+
+### Example request
+
+```bash
+curl https://api.coffeprice.com/api/historial-precios/comprador/664f8c1a2b3d4e5f6a7b8c9d \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example response
+
+```json
+[
+  {
+    "_id": "665c3d4e5f6a7b8c9d0e1f20",
+    "comprador": {
+      "_id": "664f8c1a2b3d4e5f6a7b8c9d",
+      "nombreempresa": "Café del Sur S.A.S."
+    },
+    "preciocarga": 1900000,
+    "preciokg": 15200,
+    "tipocafe": "pergamino_seco",
+    "createdAt": "2024-06-01T10:42:00.000Z"
+  },
+  {
+    "_id": "665c3d4e5f6a7b8c9d0e1f10",
+    "comprador": {
+      "_id": "664f8c1a2b3d4e5f6a7b8c9d",
+      "nombreempresa": "Café del Sur S.A.S."
+    },
+    "preciocarga": 1850000,
+    "preciokg": 14800,
+    "tipocafe": "pergamino_seco",
+    "createdAt": "2024-06-01T08:00:00.000Z"
+  },
+  {
+    "_id": "665c3d4e5f6a7b8c9d0e1f05",
+    "comprador": {
+      "_id": "664f8c1a2b3d4e5f6a7b8c9d",
+      "nombreempresa": "Café del Sur S.A.S."
+    },
+    "preciocarga": 5200,
+    "preciokg": 5200,
+    "tipocafe": "pasilla",
+    "createdAt": "2024-05-30T14:20:00.000Z"
+  }
+]
+```

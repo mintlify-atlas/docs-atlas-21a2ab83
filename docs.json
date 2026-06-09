@@ -1,72 +1,110 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "CoffePrice",
+  "theme": "almond",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
-  },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "primary": "#6B3C1E",
+    "light": "#F5DFC0",
+    "dark": "#3D1F0D"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/JaiderT/CoffeePrice"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/JaiderT/CoffeePrice"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Overview",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "deployment"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/prices",
+              "features/predictions",
+              "features/buyer-map",
+              "features/alerts",
+              "features/news",
+              "features/chatbot"
+            ]
+          },
+          {
+            "group": "User Roles",
+            "pages": [
+              "roles/overview",
+              "roles/producer",
+              "roles/buyer",
+              "roles/admin"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth/overview",
+              "api/auth/register",
+              "api/auth/login",
+              "api/auth/google-oauth"
+            ]
+          },
+          {
+            "group": "Prices & Predictions",
+            "pages": [
+              "api/prices",
+              "api/predictions",
+              "api/price-history"
+            ]
+          },
+          {
+            "group": "Buyers & Map",
+            "pages": [
+              "api/buyers",
+              "api/buyer-map"
+            ]
+          },
+          {
+            "group": "Users & Alerts",
+            "pages": [
+              "api/users",
+              "api/alerts",
+              "api/news",
+              "api/chatbot"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "ML Pipeline",
+        "groups": [
+          {
+            "group": "Price Prediction Model",
+            "pages": [
+              "ml/overview",
+              "ml/data-sources",
+              "ml/training",
+              "ml/automation"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

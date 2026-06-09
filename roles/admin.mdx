@@ -1,0 +1,238 @@
+---
+title: "Admin Role and Platform Management in CoffePrice"
+sidebarTitle: "Admin"
+description: "Admins in CoffePrice manage user accounts, approve buyers, moderate news and reviews, configure platform settings, and access all data across all roles."
+---
+
+The **admin** role is the superuser tier of CoffePrice. Admins have unrestricted read and write access across all data, can approve or reject buyer registrations, moderate platform content, and tune configuration settings that affect every user. Because the admin role carries significant privilege, there is no self-service registration path — admin accounts must be provisioned directly.
+
+<Note>
+  There is no public registration flow for admin accounts. An admin account must be created directly in the MongoDB database or promoted from an existing account by a current admin (via `PUT /api/usuario/:id/actualizar` with `"rol": "admin"`).
+</Note>
+
+## Admin Dashboard
+
+The admin dashboard at `/admin/dashboard` gives a real-time overview of platform activity, including:
+
+- Total registered users broken down by role and estado
+- Pending buyer approval requests
+- Recent news articles and their publication status
+- Platform configuration summary
+- Pending review moderation queue
+
+## User Management
+
+Admins have full CRUD control over every user account on the platform.
+
+<Tabs>
+  <Tab title="List all users">
+    ```http
+    GET /api/usuario
+    Authorization: Bearer <admin_token>
+    ```
+
+    Returns an array of all user documents. Sensitive fields (`password`, `codigoRecuperacion`, `codigoVerificacion`, etc.) are stripped from the response.
+
+    ```json
+    [
+      {
+        "_id": "664a1f...",
+        "nombre": "Carlos",
+        "apellido": "Muñoz",
+        "email": "carlos@example.com",
+        "rol": "productor",
+        "estado": "activo",
+        "ultimaConexion": "2025-05-10T08:23:00.000Z"
+      }
+    ]
+    ```
+  </Tab>
+  <Tab title="Change user state">
+    ```http
+    PUT /api/usuario/:id/estado
+    Authorization: Bearer <admin_token>
+    Content-Type: application/json
+
+    {
+      "estado": "suspendido",
+      "motivoRevision": "Cuenta bajo revisión por actividad inusual."
+    }
+    ```
+
+    Valid values for `estado`: `activo` · `pendiente` · `rechazado` · `eliminado` · `suspendido`.
+
+    When the target user is a **comprador**, this endpoint also automatically updates the linked buyer record's `estadoRevision`:
+
+    | User estado set to | Buyer estadoRevision becomes |
+    |--------------------|------------------------------|
+    | `activo` | `aprobado` |
+    | `rechazado` | `rechazado` (with `motivoRevision`) |
+    | `pendiente` | `en_revision` |
+
+    A decision email is sent to the buyer automatically.
+  </Tab>
+  <Tab title="Update user data">
+    ```http
+    PUT /api/usuario/:id/actualizar
+    Authorization: Bearer <admin_token>
+    Content-Type: application/json
+
+    {
+      "nombre": "Carlos",
+      "apellido": "Muñoz",
+      "celular": "3109876543",
+      "estado": "activo",
+      "rol": "productor"
+    }
+    ```
+
+    Admins can update any combination of `nombre`, `apellido`, `celular`, `estado`, and `rol`. Regular users updating their own profile cannot change `estado` or `rol`.
+  </Tab>
+  <Tab title="Delete user">
+    ```http
+    DELETE /api/usuario/:id
+    Authorization: Bearer <admin_token>
+    ```
+
+    Performs a **soft delete** — sets `estado: "eliminado"`. The document is retained in the database for audit purposes but the user can no longer log in or access any protected route.
+  </Tab>
+</Tabs>
+
+## Buyer Approval
+
+Buyer approval is the most time-sensitive admin task. When a new comprador completes their profile, all active admins receive an email notification. The approval workflow is managed through the comprador API.
+
+<Steps>
+  <Step title="Review pending buyers">
+    ```http
+    GET /api/comprador
+    Authorization: Bearer <admin_token>
+    ```
+
+    Returns **all** buyer profiles regardless of `estadoRevision`, including those in `en_revision`. Each document is populated with the linked user's `nombre`, `apellido`, `email`, and `estado`.
+  </Step>
+  <Step title="Approve or reject via user state">
+    Use `PUT /api/usuario/:id/estado` (see User Management above) with `estado: "activo"` to approve or `estado: "rechazado"` to reject. This is the canonical approval path because it updates both the user record and the buyer's `estadoRevision` atomically and triggers the decision email.
+  </Step>
+  <Step title="Update buyer profile directly">
+    ```http
+    PUT /api/comprador/:id
+    Authorization: Bearer <admin_token>
+    Content-Type: application/json
+
+    {
+      "estadoRevision": "aprobado",
+      "municipio": "Pitalito",
+      "descripcion": "Updated by admin after review."
+    }
+    ```
+
+    Admins can edit any field on a buyer profile, including `estadoRevision`, without going through the user state endpoint. Use this for corrections or re-approvals.
+  </Step>
+</Steps>
+
+## News Management
+
+CoffePrice surfaces coffee industry news to all users. Admins control the full lifecycle of news articles.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/noticias` | POST | Create a new news article manually |
+| `/api/noticias/:id` | PUT | Update an existing article |
+| `/api/noticias/:id` | DELETE | Remove an article from the platform |
+| `/api/noticias/generar-automaticas` | POST | Trigger the AI pipeline to generate news articles automatically |
+| `/api/noticias/limpiar-danadas` | POST | Remove or repair malformed/broken articles from the database |
+
+### Creating an Article Manually
+
+```http
+POST /api/noticias
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "titulo": "Precio del café sube por tercer día consecutivo",
+  "contenido": "El precio de referencia FNC alcanzó...",
+  "imagen": "https://cdn.coffeprice.co/noticias/imagen.jpg",
+  "fuente": "FNC",
+  "categoria": "precios"
+}
+```
+
+### AI-Generated News
+
+```http
+POST /api/noticias/generar-automaticas
+Authorization: Bearer <admin_token>
+```
+
+Triggers the automatic news generation pipeline. The system fetches recent market data and produces summaries that are saved as draft articles for admin review before publication.
+
+## Platform Configuration
+
+Global platform settings (such as price update intervals, alert thresholds, feature flags, and notification preferences) are stored in a single configuration document.
+
+```http
+GET /api/configuracion
+Authorization: Bearer <admin_token>
+```
+
+```http
+PUT /api/configuracion
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "intervaloActualizacionPrecios": 30,
+  "alertasHabilitadas": true,
+  "mantenimiento": false
+}
+```
+
+<Note>
+  `GET /api/configuracion` and `PUT /api/configuracion` are restricted to the `admin` role. Non-admin users receive a `403` response.
+</Note>
+
+## Review Moderation
+
+Users can submit platform reviews. Admins moderate the queue before reviews become publicly visible.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/resenas-plataforma/todas` | GET | List all submitted reviews (including pending ones) |
+| `/api/resenas-plataforma/:id/aprobar` | PUT | Approve a review and make it publicly visible |
+| `/api/resenas-plataforma/:id` | DELETE | Remove a review permanently |
+
+### Approving a Review
+
+```http
+PUT /api/resenas-plataforma/:id/aprobar
+Authorization: Bearer <admin_token>
+```
+
+A `200` response confirms the review has been approved. Approved reviews appear in the public-facing section of the platform landing page.
+
+## Admin Frontend Routes
+
+| Route | Component | Description |
+|-------|-----------|-------------|
+| `/admin/dashboard` | `DashboardAdmin` | Platform activity overview |
+| `/admin/perfil` | `PerfilAdmin` | Admin's own profile and account settings |
+| `/configuracion` | `Configuracion` | Platform configuration editor |
+| `/historial` | `Historial` | Full price history (accessible to admins and producers) |
+| `/predicciones` | `Predicciones` | Price prediction view |
+| `/mapa` | `MapaCompradores` | Regional buyer map |
+
+## Permission Summary
+
+| Action | Endpoint | Admin | Comprador | Productor |
+|--------|----------|-------|-----------|-----------|
+| List all users | `GET /api/usuario` | ✅ | ❌ | ❌ |
+| Change user estado | `PUT /api/usuario/:id/estado` | ✅ | ❌ | ❌ |
+| List all buyers | `GET /api/comprador` | ✅ | ❌ | ❌ |
+| Update any buyer | `PUT /api/comprador/:id` | ✅ | Owner only | ❌ |
+| Create news | `POST /api/noticias` | ✅ | ❌ | ❌ |
+| Platform config | `PUT /api/configuracion` | ✅ | ❌ | ❌ |
+| Moderate reviews | `PUT /api/resenas-plataforma/:id/aprobar` | ✅ | ❌ | ❌ |
+| View prices | `GET /api/precios` | ✅ | ✅ | ✅ |
+| View predictions | `GET /api/predicciones` | ✅ | ✅ | ✅ |

@@ -1,0 +1,198 @@
+---
+title: "POST /api/auth/register — Create a New Account"
+sidebarTitle: "Register"
+description: "Register a new CoffePrice user with email and password. Returns a verification email with a 6-digit code. Roles: productor or comprador. Rate limited to prevent abuse."
+---
+
+Create a new CoffePrice account by submitting a name, email address, password, and role. The account is created in a `pendiente` (pending) state and a **6-digit verification code** is immediately sent to the provided email address. The user must verify their email before they can log in (or, for `comprador` accounts, before completing their business profile).
+
+---
+
+## Endpoint
+
+```
+POST /api/auth/register
+```
+
+**Rate limit:** 100 requests per 15 minutes per IP (`registerLimiter`).
+
+---
+
+## Request Body
+
+<ParamField body="nombre" type="string" required>
+  The user's first name. Whitespace is trimmed automatically.
+</ParamField>
+
+<ParamField body="apellido" type="string" required>
+  The user's last name. Whitespace is trimmed automatically.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  A valid, unique email address. The value is normalized to lowercase before being stored. Returns `409` if the address is already registered and verified.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Account password. Must be **at least 10 characters** and contain at least one uppercase letter, one lowercase letter, and one digit. See the [Password Requirements](#password-requirements) note below.
+</ParamField>
+
+<ParamField body="celular" type="string">
+  The user's phone number (optional).
+</ParamField>
+
+<ParamField body="rol" type="string" required>
+  The account role. Must be one of:
+  - `productor` — coffee producer account.
+  - `comprador` — buyer/business account (requires additional profile step after verification).
+</ParamField>
+
+---
+
+## Success Response — `201 Created`
+
+```json
+{
+  "message": "Codigo de verificacion enviado al correo."
+}
+```
+
+The user record is created with `estado: "pendiente"`. No JWT cookie is issued at this stage — authentication happens after the email is verified via `POST /api/auth/verify-email`.
+
+<Note>
+  If a registration attempt is made with an email that already has a **pending** (unverified) account, CoffePrice will **resend** a fresh verification code to that address and return `200 OK` instead of `201`. This prevents duplicate accounts while still helping users who never verified.
+</Note>
+
+---
+
+## Email Verification Flow
+
+After a successful registration, users must verify their email before they can access the platform.
+
+### Submit the verification code
+
+<ParamField body="email" type="string" required>
+  The email address used during registration.
+</ParamField>
+
+<ParamField body="code" type="string" required>
+  The 6-digit verification code sent to the user's inbox. Valid for **10 minutes**.
+</ParamField>
+
+```
+POST /api/auth/verify-email
+```
+
+```json
+{
+  "email": "maria@example.com",
+  "code": "482910"
+}
+```
+
+**Rate limit:** 6 requests per 15 minutes per IP (`verifyLimiter`).
+
+On success the server returns `200 OK`, sets the `auth_token` cookie, and returns the user session object. For `comprador` accounts the response includes `"pendiente": true`, indicating the business profile still needs to be completed.
+
+### Re-send the verification code
+
+If the code expires or is lost, request a new one:
+
+```
+POST /api/auth/resend-verification
+```
+
+```json
+{
+  "email": "maria@example.com"
+}
+```
+
+**Rate limit:** 4 requests per 15 minutes per IP (`resendVerificationLimiter`).
+
+A new code cannot be sent if the existing code still has more than 9 minutes of validity remaining — the server returns `429` in that case.
+
+---
+
+## Error Responses
+
+| Status | Condition                                                                    |
+| ------ | ---------------------------------------------------------------------------- |
+| `400`  | Missing required fields, invalid email format, or password fails validation. |
+| `409`  | Email is already registered and verified (`El correo ya esta registrado`).   |
+| `429`  | Rate limit exceeded.                                                         |
+| `500`  | Unexpected server error.                                                     |
+
+---
+
+## Examples
+
+### Register a new productor account
+
+```bash
+curl -X POST https://api.coffeprice.com/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Maria",
+    "apellido": "Lopez",
+    "email": "maria@example.com",
+    "password": "SecurePass1",
+    "celular": "3001234567",
+    "rol": "productor"
+  }'
+```
+
+```json
+{
+  "message": "Codigo de verificacion enviado al correo."
+}
+```
+
+### Verify the email address
+
+```bash
+curl -X POST https://api.coffeprice.com/api/auth/verify-email \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "maria@example.com",
+    "code": "482910"
+  }'
+```
+
+```json
+{
+  "message": "Correo verificado exitosamente",
+  "pendiente": false,
+  "user": {
+    "id": "664f1a2b3c4d5e6f7a8b9c0d",
+    "nombre": "Maria",
+    "apellido": "Lopez",
+    "email": "maria@example.com",
+    "rol": "productor",
+    "celular": "3001234567",
+    "estado": "activo"
+  },
+  "role": "productor",
+  "name": "Maria",
+  "apellido": "Lopez",
+  "id": "664f1a2b3c4d5e6f7a8b9c0d",
+  "celular": "3001234567",
+  "email": "maria@example.com"
+}
+```
+
+---
+
+## Password Requirements
+
+<Note>
+  Passwords must satisfy **all** of the following rules:
+
+  - Minimum **10 characters** in length.
+  - At least **one uppercase letter** (A–Z).
+  - At least **one lowercase letter** (a–z).
+  - At least **one digit** (0–9).
+
+  Example of a valid password: `CoffeeBean2024`
+
+  Passwords are hashed with **bcrypt** (salt rounds: 10) before storage. Plain-text passwords are never persisted.
+</Note>

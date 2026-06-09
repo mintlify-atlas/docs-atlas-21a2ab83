@@ -1,0 +1,120 @@
+---
+title: "Data Sources for CoffePrice Price Predictions"
+sidebarTitle: "Data Sources"
+description: "CoffePrice's ML pipeline ingests FNC historical prices, KC futures, COP/USD TRM exchange rates, Brazil climate data, ICE inventory levels, and USD/BRL rates."
+---
+
+The pipeline combines six distinct data streams to build its daily feature matrix. Three are considered critical inputs — without them the pipeline aborts — while the remaining three are optional external signals that enrich the model but are filled with safe defaults when unavailable.
+
+## Data Source Inventory
+
+| Source | Script | Output file | Description |
+|--------|--------|-------------|-------------|
+| FNC historical prices | `obtener_fnc_automatico.py` | `datos/precios_fnc_historicos.csv` | FNC internal price per carga (COP), scraped from the FNC website |
+| KC futures (NY Coffee C) | `obtener_kc_automatico.py` | `datos/precios_limpios.csv` | NY Coffee C closing price in ¢/lb, fetched from Yahoo Finance (`KC=F`) |
+| COP/USD TRM | `obtener_trm_automatico.py` | `datos/trm_limpias.csv` | Colombian peso exchange rate, fetched from Frankfurter API with open.er-api.com as fallback |
+| Brazil climate | `obtener_clima_brasil.py` | `datos/clima_brasil.csv` | Weather alert flags for key Brazilian coffee-growing regions |
+| ICE inventories | `obtener_inventarios_ice.py` | `datos/inventarios_ice.csv` | Certified coffee warehouse stocks held at ICE exchange |
+| USD/BRL | `obtener_usd_brl.py` | `datos/usd_brl_historico.csv` | USD to Brazilian Real exchange rate |
+
+<Note>
+FNC prices are scraped directly from `https://federaciondecafeteros.org/wp/`. The scraper looks for the internal price inside patterns like `"Precio interno"` and `"Carga de 125 kg"` and validates that the extracted number falls between COP 1,500,000 and COP 4,000,000.
+</Note>
+
+## External Variable Columns
+
+After all sources are merged, `variables_externas.py` assembles the following columns into `datos/variables_externas.csv`. These are the external variable columns consumed by the model at training and prediction time:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `petroleo_wti` | float | WTI crude oil price proxy (USD/barrel) |
+| `flete_fbx` | float | Freightos Baltic Index proxy (USD) — global freight cost signal |
+| `volumen_ice` | float | Trading volume at ICE |
+| `inventario_ice` | float | Certified coffee inventory stocks at ICE (bags) |
+| `usd_brl` | float | USD to Brazilian Real exchange rate |
+| `clima_brasil_alerta` | int (0/1) | Binary flag: 1 if a weather alert is active for Brazil growing regions |
+| `clima_brasil_intensidad` | float | Intensity score of the weather alert (0 = none) |
+
+<Note>
+`petroleo_wti`, `flete_fbx`, and `volumen_ice` currently use static proxy values (`78.5`, `2800.0`, `15000.0` respectively) while live data integrations for those feeds are in development. They are treated as real features by the model but contribute minimal predictive signal until live data is wired in.
+</Note>
+
+## Data Cleaning
+
+`limpiar_datos.py` is the first processing step after data collection. It delegates to `load_raw_kc()` and `load_raw_trm()` in `pipeline_fnc_hibrido.py` and applies the following transformations:
+
+<Steps>
+  <Step title="KC Price Range Filter">
+    Any KC record outside **50–500 ¢/lb** is dropped. This eliminates obvious data errors while covering the full realistic range of the Coffee C contract.
+  </Step>
+  <Step title="TRM Range Filter">
+    Any TRM record outside **2,000–6,000 COP/USD** is dropped, guarding against API responses that return rates in wrong units or obvious outliers.
+  </Step>
+  <Step title="Decimal Normalisation">
+    Raw CSV files can arrive with either comma or dot as the decimal separator (Colombian convention vs. international). The `parse_decimal()` function handles all combinations:
+    - `"1,234.56"` → `1234.56`
+    - `"1.234,56"` → `1234.56`
+    - `"185,4"` → `185.4`
+  </Step>
+  <Step title="Date Deduplication">
+    After parsing, rows are sorted by date and `drop_duplicates(subset=["ds"], keep="last")` is applied, so the most recent value for any given day wins. This is important because the KC and TRM files can overlap between automated fetches and manually uploaded historical CSVs.
+  </Step>
+  <Step title="Gap Filling">
+    Once the clean files are written, the base dataframe builder applies `ffill().bfill()` on all numeric columns so that weekends, holidays, and sporadic missing days do not propagate NaNs into the feature matrix.
+  </Step>
+</Steps>
+
+The outputs are:
+- `datos/precios_limpios.csv` — clean KC history (`ds`, `y` columns)
+- `datos/trm_limpias.csv` — clean TRM history (`ds`, `trm` columns, semicolon-separated, comma decimal)
+
+## Feature Engineering Overview
+
+`pipeline_fnc_hibrido.py` transforms the cleaned, merged dataset into a supervised learning frame. Features are grouped into five families:
+
+### Formula Columns
+Derived from the KC → COP conversion formula and the historical relationship between the formula price and the actual FNC price:
+
+| Column | Description |
+|--------|-------------|
+| `precio_formula_base` | `(kc_centavos / 100) × trm × 275.578` |
+| `factor_formula_implicito` | Rolling ratio of actual FNC price to formula base (14-day median) |
+| `precio_formula_ajustada` | `precio_formula_base × factor_formula_implicito` |
+| `residuo_formula` | `precio_fnc − precio_formula_ajustada` |
+
+### Calendar Columns
+Allow the model to learn day-of-week and seasonal FNC pricing patterns:
+
+`dia_semana`, `mes`, `dia_mes`, `semana_anio`, `es_fin_de_semana`
+
+### Lag Features
+Capture autocorrelation in FNC, KC, and TRM series:
+
+| Series | Lags available |
+|--------|----------------|
+| FNC price | `fnc_lag_1`, `fnc_lag_2`, `fnc_lag_3`, `fnc_lag_7` |
+| KC futures | `kc_lag_1`, `kc_lag_2`, `kc_lag_3` |
+| TRM | `trm_lag_1`, `trm_lag_2` |
+
+### Moving Averages
+Smooth short-term noise and expose medium-term trends:
+
+| Series | Windows |
+|--------|---------|
+| FNC | `fnc_ma_3`, `fnc_ma_7` |
+| KC  | `kc_ma_3`, `kc_ma_7` |
+| TRM | `trm_ma_3`, `trm_ma_7` |
+
+### Volatility and Return Rates
+Measure momentum and recent price velocity:
+
+| Column | Description |
+|--------|-------------|
+| `fnc_volatilidad_7` | 7-day rolling standard deviation of FNC price |
+| `fnc_retorno_1d` | FNC 1-day percentage return |
+| `kc_retorno_1d` | KC 1-day percentage return |
+| `trm_retorno_1d` | TRM 1-day percentage return |
+
+<Tip>
+The final feature set passed to XGBoost (`feature_columns()`) contains **40 columns** including `prophet_yhat` as an additional input, allowing XGBoost to learn corrections on top of Prophet's forecast rather than starting from scratch.
+</Tip>

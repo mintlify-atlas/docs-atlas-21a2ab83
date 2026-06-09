@@ -1,0 +1,159 @@
+---
+title: "Automating Daily Price Predictions with GitHub Actions"
+sidebarTitle: "Automation"
+description: "CoffePrice runs its ML pipeline automatically Mon–Fri at 20:15 UTC (3:15 pm Colombia) via a GitHub Actions workflow that commits updated prediction files and triggers a redeploy."
+---
+
+CoffePrice uses a GitHub Actions workflow to run its full ML pipeline automatically every weekday. The workflow fetches live KC futures and TRM data, retrains the model, generates the next-day FNC price prediction, and commits the updated output files back to the repository. Because Railway (backend) and Netlify (frontend) are configured to auto-deploy on push, a single commit is all it takes to deliver a fresh prediction to the live site.
+
+## GitHub Actions Workflow
+
+**File:** `.github/workflows/actualizar-predicciones.yml`
+
+```yaml
+name: Actualizar predicciones FNC
+
+on:
+  schedule:
+    - cron: '15 20 * * 1-5'
+  workflow_dispatch:
+    inputs: {}
+
+permissions:
+  contents: write
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias ML
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ml-service-experimental/requirements_hibrido.txt
+
+      - name: Generar predicción diaria
+        working-directory: ml-service-experimental
+        run: python actualizar_todo.py
+
+      - name: Commit y push de artefactos
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/datos \
+            ml-service-experimental/datos \
+            ml-service-experimental/modelos/metricas_fnc_hibrido.json
+          if git diff --cached --quiet; then
+            echo "No hubo cambios para publicar."
+            exit 0
+          fi
+          git commit -m "chore: actualizar predicciones automáticas"
+          git push
+```
+
+## Schedule
+
+The cron expression `15 20 * * 1-5` triggers the workflow **Monday through Friday at 20:15 UTC**, which is **3:15 pm Colombia time (UTC−5)**. This timing was chosen to run after the NY Coffee C (KC=F) futures session has settled for the day, ensuring the latest closing price is available.
+
+## What the Workflow Does — Step by Step
+
+<Steps>
+  <Step title="Checkout the repository">
+    Uses `actions/checkout@v4` with `fetch-depth: 0` (full history) so that the commit step can push back without shallow-clone issues.
+  </Step>
+  <Step title="Set up Python 3.11">
+    Installs the Python runtime via `actions/setup-python@v5`.
+  </Step>
+  <Step title="Install ML dependencies">
+    Installs all packages from `ml-service-experimental/requirements_hibrido.txt`, including `prophet==1.1.5`, `xgboost==2.0.3`, `pandas==2.0.3`, and supporting libraries.
+  </Step>
+  <Step title="Run the full pipeline">
+    Executes `python actualizar_todo.py` from the `ml-service-experimental/` directory. This single command orchestrates all 11 pipeline steps: fetching KC, TRM, and FNC data; cleaning; building external variables; training Prophet and XGBoost; generating the prediction; and running evaluation.
+  </Step>
+  <Step title="Commit updated artefacts">
+    Stages three paths:
+    - `backend/datos/` — includes `predicciones_fnc.json` and `historial_predicciones_fnc.csv`
+    - `ml-service-experimental/datos/` — includes prediction history and evaluation CSV
+    - `ml-service-experimental/modelos/metricas_fnc_hibrido.json` — latest model metrics
+
+    If there are no changes (e.g. the pipeline produced identical output), the step exits cleanly with `exit 0` and no commit is made.
+  </Step>
+  <Step title="Push → trigger auto-deploy">
+    The `git push` targets the same branch the workflow checked out. Railway and Netlify listen for pushes on that branch and redeploy automatically, making the fresh prediction live within minutes.
+  </Step>
+</Steps>
+
+## Manual Trigger
+
+The `workflow_dispatch` trigger allows running the workflow on demand from the GitHub UI without waiting for the scheduled time:
+
+1. Go to the **Actions** tab in the GitHub repository.
+2. Select **"Actualizar predicciones FNC"** from the left sidebar.
+3. Click **"Run workflow"**, choose the branch, and click the green **"Run workflow"** button.
+
+This is useful for rerunning after a failed schedule, for testing after code changes, or for generating a prediction for a specific date using a code modification.
+
+## Prerequisites for Automation
+
+<CardGroup cols={2}>
+  <Card title="GitHub Actions Enabled" icon="github">
+    GitHub Actions must be enabled for the repository. Check **Settings → Actions → General** and ensure actions are allowed.
+  </Card>
+  <Card title="Railway Auto-Deploy" icon="server">
+    The Railway backend project must be linked to the repository branch with auto-deploy enabled so it picks up the committed `predicciones_fnc.json`.
+  </Card>
+  <Card title="Netlify Auto-Deploy" icon="globe">
+    The Netlify frontend site must be configured to rebuild on push to the same branch so the UI reflects the updated prediction.
+  </Card>
+  <Card title="No Secrets Required" icon="lock">
+    The pipeline reads and writes files only — no external API keys are stored in GitHub Secrets. The `contents: write` permission is sufficient for the commit-and-push step.
+  </Card>
+</CardGroup>
+
+## Windows Local Alternative
+
+For manual runs on Windows, `actualizar_predicciones.ps1` provides a PowerShell wrapper that navigates to the correct directory and invokes the pipeline:
+
+```powershell
+# Run with default next-business-day prediction:
+.\actualizar_predicciones.ps1
+
+# Run for a specific target date:
+.\actualizar_predicciones.ps1 -FechaPrediccion "2025-06-10"
+```
+
+The script changes into `ml-service-experimental/`, runs `python actualizar_todo.py` (forwarding the optional `--fecha-prediccion` argument), then confirms the output was written to `backend/datos/predicciones_fnc.json`.
+
+## Production vs. Development
+
+| Context | Recommended approach |
+|---------|---------------------|
+| **Production** | Let GitHub Actions run on its cron schedule. Push code changes; the next scheduled run picks them up automatically. |
+| **Development / testing** | Run `python actualizar_todo.py` manually inside `ml-service-experimental/`. Use `--fecha-prediccion` to backfill predictions for past dates. |
+| **Debugging a failed run** | Check the **Actions** tab on GitHub for the full log. Re-run the failed job from the UI or trigger `workflow_dispatch` after fixing the issue. |
+
+## Monitoring
+
+All workflow runs are visible in the **Actions** tab of the GitHub repository. Each run shows:
+- ✅ Green check: pipeline completed and prediction committed (or no changes to commit)
+- ❌ Red X: a critical step failed — check the expanded step log for the Python traceback
+
+Failures in non-critical steps (FNC scrape, climate data, ICE inventories) do not cause a red X; the pipeline continues and logs a warning. Only failures in KC fetch, TRM fetch, data cleaning, variable construction, model training, or prediction generation will abort the run.
+
+<Note>
+The pipeline requires at least **45 historical FNC price records** to train a usable model. If you are deploying CoffePrice to a brand-new environment, seed `datos/precios_fnc_historicos.csv` with at least two months of historical FNC prices before enabling the scheduled workflow. Without sufficient history, the training step will exit with `"No hay suficientes datos para entrenar un modelo usable."` and the run will fail.
+</Note>
+
+<Tip>
+The cron schedule `15 20 * * 1-5` is in UTC. If you need the pipeline to run at a different local time — for example, after a different market close — adjust the UTC hour accordingly. For UTC−5 (Colombia), the offset is +5 hours (local 3:15 pm = UTC 20:15). For UTC−3 (Brazil), the same wall-clock time would be `15 18 * * 1-5`.
+</Tip>

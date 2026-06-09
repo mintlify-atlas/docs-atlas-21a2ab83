@@ -1,0 +1,259 @@
+---
+title: "POST /api/auth/login — Authenticate and Get a Session"
+sidebarTitle: "Login"
+description: "Log in with email and password to receive a JWT stored in an HttpOnly cookie. Also documents GET /api/auth/me and POST /api/auth/logout."
+---
+
+CoffePrice's session endpoints let users authenticate with their email and password, retrieve their current profile, and end their session. Authentication state is maintained via a signed JWT stored in the `auth_token` HttpOnly cookie that is automatically attached to every subsequent request from the browser.
+
+---
+
+## POST /api/auth/login
+
+Validate credentials and issue a session cookie.
+
+```
+POST /api/auth/login
+```
+
+**Rate limit:** 10 requests per 15 minutes per IP (`loginLimiter`).
+
+### Request Body
+
+<ParamField body="email" type="string" required>
+  The user's registered email address. Case-insensitive — normalized to lowercase server-side.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The account password.
+</ParamField>
+
+### Success Response — `200 OK`
+
+On success the server:
+
+1. Sets the `auth_token` **HttpOnly cookie** containing a signed JWT.
+2. Updates the user's `ultimaConexion` timestamp.
+3. Returns the user session object in the response body.
+
+```json
+{
+  "user": {
+    "id": "664f1a2b3c4d5e6f7a8b9c0d",
+    "nombre": "Maria",
+    "apellido": "Lopez",
+    "email": "maria@example.com",
+    "rol": "productor",
+    "celular": "3001234567",
+    "estado": "activo"
+  },
+  "role": "productor",
+  "name": "Maria",
+  "apellido": "Lopez",
+  "id": "664f1a2b3c4d5e6f7a8b9c0d",
+  "celular": "3001234567",
+  "email": "maria@example.com"
+}
+```
+
+<ResponseField name="user" type="object">
+  Condensed session object.
+
+  <Expandable title="user fields">
+    <ResponseField name="user.id" type="string">MongoDB ObjectId of the user.</ResponseField>
+    <ResponseField name="user.nombre" type="string">First name.</ResponseField>
+    <ResponseField name="user.apellido" type="string">Last name.</ResponseField>
+    <ResponseField name="user.email" type="string">Email address.</ResponseField>
+    <ResponseField name="user.rol" type="string">Account role: `productor`, `comprador`, or `admin`.</ResponseField>
+    <ResponseField name="user.celular" type="string">Phone number, if provided.</ResponseField>
+    <ResponseField name="user.estado" type="string">Account state: `activo`, `pendiente`, `suspendido`, `rechazado`, or `eliminado`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  Shorthand copy of `user.rol`.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Shorthand copy of `user.nombre`.
+</ResponseField>
+
+<ResponseField name="apellido" type="string">
+  Shorthand copy of `user.apellido`.
+</ResponseField>
+
+<ResponseField name="id" type="string">
+  Shorthand copy of `user.id`.
+</ResponseField>
+
+<ResponseField name="celular" type="string">
+  Shorthand copy of `user.celular`.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Shorthand copy of `user.email`.
+</ResponseField>
+
+### Error Responses
+
+| Status | Condition                                                                                                          |
+| ------ | ------------------------------------------------------------------------------------------------------------------ |
+| `400`  | Missing `email` or `password`, invalid email format, or the account was created via Google (no local password).   |
+| `401`  | Email not found or password does not match (`Credenciales invalidas`).                                             |
+| `403`  | Account is `pendiente` (unverified), `rechazado` (rejected), or `eliminado` (deleted).                            |
+| `429`  | Rate limit exceeded (10 attempts per 15 minutes).                                                                  |
+| `500`  | Unexpected server error.                                                                                           |
+
+### Example
+
+```bash
+curl -X POST https://api.coffeprice.com/api/auth/login \
+  -H "Content-Type: application/json" \
+  -c cookies.txt \
+  -d '{
+    "email": "maria@example.com",
+    "password": "SecurePass1"
+  }'
+```
+
+```json
+{
+  "user": {
+    "id": "664f1a2b3c4d5e6f7a8b9c0d",
+    "nombre": "Maria",
+    "apellido": "Lopez",
+    "email": "maria@example.com",
+    "rol": "productor",
+    "celular": "3001234567",
+    "estado": "activo"
+  },
+  "role": "productor",
+  "name": "Maria",
+  "apellido": "Lopez",
+  "id": "664f1a2b3c4d5e6f7a8b9c0d",
+  "celular": "3001234567",
+  "email": "maria@example.com"
+}
+```
+
+---
+
+## GET /api/auth/me
+
+Return the full profile of the currently authenticated user.
+
+```
+GET /api/auth/me
+```
+
+**Authentication required.** Pass the `auth_token` cookie (set automatically by the browser) or supply the token manually via the `Authorization: Bearer <token>` header.
+
+### Response — `200 OK`
+
+Sensitive fields are stripped before the document is returned. The following fields are **excluded** from the response: `password`, `codigoVerificacion`, `codigoVerificacionExpira`, `codigoRecuperacion`, `codigoExpiracion`.
+
+<ResponseField name="_id" type="string">
+  MongoDB ObjectId of the user.
+</ResponseField>
+
+<ResponseField name="nombre" type="string">
+  First name.
+</ResponseField>
+
+<ResponseField name="apellido" type="string">
+  Last name.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Email address.
+</ResponseField>
+
+<ResponseField name="rol" type="string">
+  Account role: `productor`, `comprador`, or `admin`.
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  Account state: `activo`, `pendiente`, `suspendido`, `rechazado`, or `eliminado`.
+</ResponseField>
+
+<ResponseField name="celular" type="string">
+  Phone number, if provided.
+</ResponseField>
+
+<ResponseField name="googleId" type="string">
+  Google account identifier, present only for OAuth-registered users.
+</ResponseField>
+
+<ResponseField name="ultimaConexion" type="string">
+  ISO 8601 timestamp of the user's most recent login.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of account creation (added by Mongoose `timestamps`).
+</ResponseField>
+
+### Error Responses
+
+| Status | Condition                                                                 |
+| ------ | ------------------------------------------------------------------------- |
+| `401`  | No token provided, or the token is invalid/expired.                       |
+| `403`  | Account state is `rechazado`, `eliminado`, or `pendiente` (non-comprador).|
+| `404`  | Token is valid but no matching user was found in the database.            |
+
+### Example
+
+```bash
+curl https://api.coffeprice.com/api/auth/me \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+```json
+{
+  "_id": "664f1a2b3c4d5e6f7a8b9c0d",
+  "nombre": "Maria",
+  "apellido": "Lopez",
+  "email": "maria@example.com",
+  "rol": "productor",
+  "estado": "activo",
+  "celular": "3001234567",
+  "googleId": null,
+  "ultimaConexion": "2024-05-23T14:30:00.000Z",
+  "createdAt": "2024-05-20T09:00:00.000Z"
+}
+```
+
+---
+
+## POST /api/auth/logout
+
+End the current session and clear all authentication cookies.
+
+```
+POST /api/auth/logout
+```
+
+This endpoint destroys the server-side session (if any), then clears both the `auth_token` cookie and the `connect.sid` session cookie from the browser. The `Cache-Control: no-store` header is set to prevent the browser from caching the response.
+
+No request body is required.
+
+### Success Response — `200 OK`
+
+```json
+{
+  "message": "Sesion cerrada exitosamente"
+}
+```
+
+### Example
+
+```bash
+curl -X POST https://api.coffeprice.com/api/auth/logout \
+  -b cookies.txt \
+  -c cookies.txt
+```
+
+```json
+{
+  "message": "Sesion cerrada exitosamente"
+}
+```

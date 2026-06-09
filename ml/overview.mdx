@@ -1,0 +1,143 @@
+---
+title: "FNC Coffee Price Prediction Model Overview"
+sidebarTitle: "Overview"
+description: "CoffePrice predicts next-day FNC internal coffee prices using a hybrid ensemble of Prophet, XGBoost, naive carry-forward, and formula-based strategies with real market signals."
+---
+
+CoffePrice's ML pipeline forecasts the next business day's FNC (Federación Nacional de Cafeteros) internal price per carga — the benchmark price paid to Colombian coffee farmers. Every weekday afternoon the pipeline ingests the latest KC futures close, the COP/USD TRM exchange rate, and a set of external market variables, then blends four independent prediction strategies into a single ensemble price. The result is written to a JSON file that the backend API serves directly to the frontend.
+
+## Model Architecture
+
+The pipeline maintains four parallel prediction strategies. Each strategy generates its own price estimate; their outputs are then combined via inverse-MAPE weighting.
+
+<CardGroup cols={2}>
+  <Card title="Naive (Carry-Forward)" icon="arrow-right">
+    Predicts that tomorrow's FNC price equals today's. Surprisingly competitive on stable days. Ensemble weight: **0.4516**.
+  </Card>
+  <Card title="Formula (KC × TRM)" icon="calculator">
+    Converts the NY Coffee C futures price to COP using the TRM and a rolling 14-day calibration factor, then adds an XGBoost residual correction. Ensemble weight: **0.3577**.
+  </Card>
+  <Card title="Prophet (Time-Series)" icon="chart-line">
+    Facebook Prophet model with yearly and weekly seasonality, `kc_centavos` and `trm` as external regressors. Ensemble weight: **0.0987**.
+  </Card>
+  <Card title="Hybrid XGBoost" icon="microchip">
+    Prophet's forecast plus an XGBoost model trained on the 40-feature residual. Captures non-linear interactions between lag prices, moving averages, and market signals. Ensemble weight: **0.092**.
+  </Card>
+</CardGroup>
+
+### Ensemble Weights (from `metricas_fnc_hibrido.json`)
+
+Weights are derived from inverse-MAPE on the holdout set, with a small naive penalty (`naive_penalty=0.92`) to avoid over-relying on carry-forward in dynamic markets:
+
+```json
+{
+  "naive":   0.4516,
+  "formula": 0.3577,
+  "prophet": 0.0987,
+  "hybrid":  0.092
+}
+```
+
+### Selected Strategy
+
+The current selected strategy is **`naive`** with a holdout MAPE of **0.8784%**. Strategy selection is determined by `choose_primary_strategy()`: naive wins unless another strategy beats it by more than 20% relative; if the margin is within 20%, the ensemble is used instead.
+
+### Dynamic Weight Adjustment
+
+At prediction time, the pipeline computes a **market signal strength** score (0–1) from the daily percentage changes in KC futures and TRM:
+
+```
+signal_strength = (0.65 × |kc_change_pct| / 1.2) + (0.35 × |trm_change_pct| / 0.8)
+                  clamped to [0, 1]
+```
+
+When signal strength is non-zero, the ensemble weights are shifted dynamically:
+
+| Strategy | Adjustment factor |
+|----------|------------------|
+| naive    | weight × (1 − 0.75 × signal) |
+| formula  | weight × (1 + 0.65 × signal) |
+| hybrid   | weight × (1 + 0.55 × signal) |
+| prophet  | weight × (1 + 0.35 × signal) |
+
+This means on high-volatility days (strong KC or TRM moves) the model leans away from carry-forward and toward market-reactive strategies.
+
+## Performance Metrics
+
+All MAPE values are percentages. Data sourced from `metricas_fnc_hibrido.json` (361 base records, trained 2025-05-30 → 2026-05-25).
+
+### Holdout Set (last ~20% of data, min 14 days)
+
+| Strategy  | MAPE (%) | MAE (COP) |
+|-----------|----------|-----------|
+| **naive** | **0.88** | 19,714 |
+| formula   | 1.21     | 26,986 |
+| ensemble  | 1.52     | 33,784 |
+| prophet   | 4.37     | 96,647 |
+| hybrid    | 4.69     | 103,733 |
+
+### Training Set
+
+| Strategy | MAPE (%) | MAE (COP) |
+|----------|----------|-----------|
+| hybrid   | 0.40     | 10,354 |
+| ensemble | 0.71     | 18,479 |
+| formula  | 0.78     | 19,944 |
+| naive    | 1.33     | — |
+| prophet  | 1.45     | — |
+
+<Note>
+The large gap between hybrid's training MAPE (0.40%) and holdout MAPE (4.69%) reflects that XGBoost over-fits on the training window. The naive strategy generalises best on the current holdout period, which is why it is selected as the primary strategy.
+</Note>
+
+## Output Files
+
+| File | Description |
+|------|-------------|
+| `backend/datos/predicciones_fnc.json` | Latest prediction payload served by the API |
+| `ml-service-experimental/datos/historial_predicciones_fnc.csv` | Full prediction history (one row per run) |
+| `ml-service-experimental/datos/evaluacion_predicciones_fnc.csv` | Evaluation against real FNC prices once they are published |
+| `ml-service-experimental/modelos/metricas_fnc_hibrido.json` | Latest training metrics and ensemble weights |
+
+## Pipeline Stages
+
+<Steps>
+  <Step title="Data Collection">
+    Four fetch scripts pull the latest market data automatically:
+    - `obtener_fnc_automatico.py` scrapes the FNC website for today's internal price
+    - `obtener_kc_automatico.py` fetches KC=F (NY Coffee C) closing price from Yahoo Finance
+    - `obtener_trm_automatico.py` retrieves the COP/USD TRM from Frankfurter API or open.er-api.com
+    - `obtener_usd_brl.py`, `obtener_clima_brasil.py`, and `obtener_inventarios_ice.py` fetch supporting external variables
+  </Step>
+  <Step title="Data Cleaning">
+    `limpiar_datos.py` consolidates raw CSV files, applies range filters, normalises decimal separators, deduplicates by date, and writes `precios_limpios.csv` and `trm_limpias.csv`.
+  </Step>
+  <Step title="Feature Engineering">
+    `pipeline_fnc_hibrido.py` builds the daily base dataframe. It merges FNC, KC, TRM, and external variables; adds formula columns; adds calendar features; and constructs a supervised frame with lag features, moving averages, volatility, and return rates — 40 features total.
+  </Step>
+  <Step title="Model Training">
+    `entrenar_fnc_hibrido.py` trains Prophet (with KC and TRM regressors) and two XGBoost correctors (one on the Prophet residual, one on the formula residual), evaluates all strategies on a temporal holdout, computes ensemble weights, and persists model artefacts plus `metricas_fnc_hibrido.json`.
+  </Step>
+  <Step title="Prediction Generation">
+    `predecir_fnc_hibrido.py` loads the saved artefacts, reconstructs today's feature row, runs all four strategies, applies dynamic weight adjustment based on live KC/TRM signals, applies a market-pressure clamp, rounds to the nearest COP 100, and writes `predicciones_fnc.json`.
+  </Step>
+  <Step title="Evaluation">
+    `evaluar_predicciones_fnc.py` joins the prediction history with the real FNC prices that have since been published, computing per-prediction error, range hit rate, and trend accuracy.
+  </Step>
+</Steps>
+
+## Conversion Constants
+
+The formula strategy converts KC futures (quoted in US cents per pound) to Colombian pesos per carga using these constants defined in `pipeline_fnc_hibrido.py`:
+
+```python
+LBS_POR_KG    = 2.20462   # pounds per kilogram
+KG_POR_CARGA  = 125       # kilograms per carga
+LBS_POR_CARGA = 275.578   # = LBS_POR_KG × KG_POR_CARGA
+```
+
+The base formula price is therefore:
+
+```
+precio_formula_base = (kc_centavos / 100) × trm × LBS_POR_CARGA
+```

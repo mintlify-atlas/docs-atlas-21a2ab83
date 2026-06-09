@@ -1,0 +1,276 @@
+---
+title: "Buyers API — Coffee Buyer Profiles and Prices"
+sidebarTitle: "Buyers"
+description: "REST endpoints to create, retrieve, update, and delete coffee buyer (comprador) profiles in CoffePrice. Buyer profiles require admin approval to appear on the public map."
+---
+
+The Buyers API manages coffee buyer (*comprador*) profiles in CoffePrice. Each profile represents a purchasing entity — a cooperative, mill, independent buyer, or exporter — operating in the Huila department of Colombia. Profiles must pass an admin review before they are visible to the public on the interactive map or in price listings.
+
+**Base URL:** `/api/comprador`
+
+<Note>
+  Only buyers with `estadoRevision: "aprobado"` (and an associated user in `activo` state) are returned on the public map or in public price listings. Profiles in any other review state are visible only to their owner or an admin.
+</Note>
+
+---
+
+## GET /api/comprador
+
+Returns all buyer profiles in the database, regardless of their review status. Reserved for administrators.
+
+**Auth:** Required — `admin` role
+
+```bash
+curl -X GET https://your-domain.com/api/comprador \
+  -H "Authorization: Bearer <admin_token>"
+```
+
+---
+
+## POST /api/comprador
+
+Creates a new buyer profile for the authenticated user. Each user account may own at most one buyer profile. After creation the profile is placed in `enRevision` state and an email notification is sent to all active admin accounts. The profile will not appear publicly until an admin approves it.
+
+**Auth:** Required — `comprador` role
+
+### Request body
+
+<ParamField body="nombreempresa" type="string" required>
+  Legal or trade name of the buying company. Must contain only letters, spaces, periods, and `&`. Must be unique across all registered buyers (trailing digits are ignored when checking uniqueness).
+</ParamField>
+
+<ParamField body="tipoempresa" type="string">
+  Category of the buying entity. Accepted values: `cooperativa`, `trilladora`, `independiente`, `exportadora`, `otro`. Defaults to `independiente`.
+</ParamField>
+
+<ParamField body="municipio" type="string">
+  Municipality in the Huila department where the buyer operates. Must be one of: `el pital`, `pitalito`, `acevedo`, `la argentina`, `tarqui`, `suaza`, `palestina`, `elias`, `saladoblanco`, `isnos`. Defaults to `El Pital`.
+</ParamField>
+
+<ParamField body="direccion" type="string" required>
+  Street address of the buyer. Stored privately and never exposed in public responses.
+</ParamField>
+
+<ParamField body="telefono" type="string" required>
+  Contact phone number. Stored privately and never exposed in public responses.
+</ParamField>
+
+<ParamField body="horarioApertura" type="string">
+  Opening time in `HH:MM` 24-hour format. Defaults to `07:00`.
+</ParamField>
+
+<ParamField body="horarioCierre" type="string">
+  Closing time in `HH:MM` 24-hour format. Defaults to `17:00`.
+</ParamField>
+
+<ParamField body="descripcion" type="string">
+  Short description of the buyer (max 300 characters).
+</ParamField>
+
+<ParamField body="servicios" type="array">
+  List of services offered by the buyer (e.g., `["pesaje", "transporte"]`).
+</ParamField>
+
+```bash
+curl -X POST https://your-domain.com/api/comprador \
+  -H "Authorization: Bearer <comprador_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombreempresa": "Café del Sur",
+    "tipoempresa": "cooperativa",
+    "municipio": "pitalito",
+    "direccion": "Calle 5 # 10-20",
+    "telefono": "3101234567",
+    "horarioApertura": "07:00",
+    "horarioCierre": "17:00",
+    "descripcion": "Cooperativa cafetera con más de 20 años de experiencia.",
+    "servicios": ["pesaje", "transporte", "asistencia técnica"]
+  }'
+```
+
+**Response `201 Created`**
+
+```json
+{
+  "comprador": {
+    "_id": "64f1a2b3c4d5e6f7a8b9c0d1",
+    "usuario": "64f1a2b3c4d5e6f7a8b9c0aa",
+    "nombreempresa": "Café del Sur",
+    "tipoempresa": "cooperativa",
+    "municipio": "pitalito",
+    "direccion": "Calle 5 # 10-20",
+    "telefono": "3101234567",
+    "horarioApertura": "07:00",
+    "horarioCierre": "17:00",
+    "descripcion": "Cooperativa cafetera con más de 20 años de experiencia.",
+    "servicios": ["pesaje", "transporte", "asistencia técnica"],
+    "estadoRevision": "enRevision",
+    "UbicacionVerificada": false,
+    "motivoRevision": null,
+    "fechaRevision": null,
+    "aprobadoPor": null,
+    "createdAt": "2024-06-01T10:00:00.000Z",
+    "updatedAt": "2024-06-01T10:00:00.000Z"
+  },
+  "message": "Perfil creado. Tu cuenta está pendiente de aprobación."
+}
+```
+
+---
+
+## GET /api/comprador/usuario/:usuarioId
+
+Returns the buyer profile associated with a specific user ID. Only the profile owner or an admin may call this endpoint.
+
+**Auth:** Required
+
+| Path parameter | Type | Description |
+|---|---|---|
+| `usuarioId` | string | MongoDB ObjectId of the user whose buyer profile to fetch. |
+
+```bash
+curl -X GET https://your-domain.com/api/comprador/usuario/64f1a2b3c4d5e6f7a8b9c0aa \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /api/comprador/:id
+
+Returns a single buyer profile by its `_id`. Authentication is optional. The response shape depends on who is making the request:
+
+- **Unauthenticated** or **authenticated non-admin non-owner**: receives a sanitized public view. Contact details are omitted and coordinates are approximate. If the buyer is not yet approved, a `404` is returned.
+- **Admin or profile owner**: receives the full document with all fields.
+
+**Auth:** Optional
+
+| Path parameter | Type | Description |
+|---|---|---|
+| `id` | string | MongoDB ObjectId of the buyer profile. |
+
+**Sanitized public response fields**
+
+| Field | Description |
+|---|---|
+| `_id` | Buyer profile ID. |
+| `nombreempresa` | Company name. |
+| `tipoempresa` | Company category. |
+| `municipio` | Municipality. |
+| `ubicacionGeneral` | Human-readable zone string (e.g. `"Zona de pitalito"`). |
+| `latitud` | Approximate latitude (hash-based offset from municipality center). |
+| `longitud` | Approximate longitude (hash-based offset from municipality center). |
+| `coordenadasEstimadas` | Always `true` in public responses. |
+| `horarioApertura` | Opening time. |
+| `horarioCierre` | Closing time. |
+| `descripcion` | Buyer description. |
+| `servicios` | Array of offered services. |
+| `contactoRestringido` | Always `true`. Signals that `direccion` and `telefono` are withheld. |
+
+```bash
+# Unauthenticated — sanitized public view
+curl -X GET https://your-domain.com/api/comprador/64f1a2b3c4d5e6f7a8b9c0d1
+
+# Authenticated admin or owner — full profile
+curl -X GET https://your-domain.com/api/comprador/64f1a2b3c4d5e6f7a8b9c0d1 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## PUT /api/comprador/:id
+
+Updates an existing buyer profile. Both the profile owner and admins may call this endpoint. All body fields are optional; only supplied fields are modified.
+
+**Auth:** Required — owner or admin
+
+| Path parameter | Type | Description |
+|---|---|---|
+| `id` | string | MongoDB ObjectId of the buyer profile to update. |
+
+The accepted body fields are identical to those of `POST /api/comprador` (`nombreempresa`, `tipoempresa`, `municipio`, `direccion`, `telefono`, `horarioApertura`, `horarioCierre`, `descripcion`, `servicios`), plus `latitud` (number) and `longitud` (number) for manual coordinate overrides.
+
+```bash
+curl -X PUT https://your-domain.com/api/comprador/64f1a2b3c4d5e6f7a8b9c0d1 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "horarioApertura": "06:00",
+    "horarioCierre": "18:00",
+    "descripcion": "Horario extendido en temporada de cosecha."
+  }'
+```
+
+---
+
+## DELETE /api/comprador/:id
+
+Permanently deletes a buyer profile. This action cannot be undone.
+
+**Auth:** Required — `admin` role
+
+| Path parameter | Type | Description |
+|---|---|---|
+| `id` | string | MongoDB ObjectId of the buyer profile to delete. |
+
+```bash
+curl -X DELETE https://your-domain.com/api/comprador/64f1a2b3c4d5e6f7a8b9c0d1 \
+  -H "Authorization: Bearer <admin_token>"
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Comprador eliminado correctamente" }
+```
+
+---
+
+## Buyer model fields
+
+The following fields are stored on every buyer document in MongoDB.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `_id` | ObjectId | — | Auto-generated. |
+| `usuario` | ObjectId (ref: `usuario`) | — | Required. The user account that owns this profile. |
+| `nombreempresa` | string | — | Required. Unique across all buyers. |
+| `tipoempresa` | string | `"independiente"` | Enum: `cooperativa`, `trilladora`, `independiente`, `exportadora`, `otro`. |
+| `direccion` | string | — | Required. Private field. |
+| `municipio` | string | `"El Pital"` | Municipality within Huila. |
+| `telefono` | string | `null` | Private field. |
+| `descripcion` | string | `null` | Max 300 characters. |
+| `servicios` | string[] | `[]` | Array of service labels. |
+| `horario` | string | `null` | Legacy free-text schedule string. |
+| `horarioApertura` | string | `"07:00"` | Opening time (`HH:MM`). |
+| `horarioCierre` | string | `"17:00"` | Closing time (`HH:MM`). |
+| `latitud` | number | `null` | Stored coordinate. Not exposed publicly; approximate value is derived at query time. |
+| `longitud` | number | `null` | Stored coordinate. Not exposed publicly; approximate value is derived at query time. |
+| `UbicacionVerificada` | boolean | `false` | Set by admin after verifying the physical address. |
+| `estadoRevision` | string | `"perfilIncompleto"` | See review workflow below. |
+| `motivoRevision` | string | `null` | Admin-supplied reason for rejection (max 500 characters). |
+| `fechaRevision` | Date | `null` | Timestamp of the last admin review action. |
+| `aprobadoPor` | ObjectId (ref: `usuario`) | `null` | Admin who approved or rejected the profile. |
+| `createdAt` | Date | — | Auto-generated by Mongoose timestamps. |
+| `updatedAt` | Date | — | Auto-generated by Mongoose timestamps. |
+
+---
+
+## `estadoRevision` workflow
+
+The `estadoRevision` field controls whether a buyer appears publicly on the CoffePrice map and price listings.
+
+```
+perfilIncompleto  ──► enRevision ──► aprobado
+                                 └──► rechazado
+```
+
+| Value | Constant | Meaning |
+|---|---|---|
+| `perfilIncompleto` | `PERFIL_INCOMPLETO` | Default state. Profile has been created but required details are missing. |
+| `enRevision` | `EN_REVISION` | Profile was submitted for review (set automatically on `POST /api/comprador`). Awaiting admin action. |
+| `aprobado` | `APROBADO` | Admin has approved the profile. The buyer appears on the public map and in price listings. |
+| `rechazado` | `RECHAZADO` | Admin has rejected the profile. The buyer does not appear publicly. |
+
+<Note>
+  Legacy records created before the `estadoRevision` field was introduced (i.e., records where the field is `null` or absent) are treated as approved by the `esCompradorAprobado` utility, provided the associated user account is `activo`.
+</Note>

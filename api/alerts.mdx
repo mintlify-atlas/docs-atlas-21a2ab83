@@ -1,0 +1,249 @@
+---
+title: "Price Alerts API — Threshold Notifications"
+sidebarTitle: "Alerts"
+description: "Create and manage price alerts in CoffePrice. When a buyer posts a price at or above your threshold, an email notification is sent automatically."
+---
+
+The Alerts API lets coffee producers configure price-threshold notifications. When a registered buyer publishes a purchase price that meets or exceeds a producer's `precioMinimo`, the platform sends an automatic email notification. Alerts can target a specific buyer or watch all buyers at once.
+
+**Base URL:** `/api/alertas`
+
+**Roles:** `productor` and `admin` only. Authenticated users with `rol: "comprador"` cannot access these endpoints.
+
+---
+
+## Alert object
+
+| Field | Type | Description |
+|---|---|---|
+| `_id` | ObjectId | Unique identifier for the alert. |
+| `usuario` | ObjectId (ref: `usuario`) | The producer who owns the alert. |
+| `comprador` | ObjectId (ref: `comprador`) \| `null` | The specific buyer to watch. `null` means any buyer can trigger this alert. |
+| `precioMinimo` | number | The minimum purchase price (COP per load/kg as configured) that triggers the alert. |
+| `activa` | boolean | Whether the alert is currently enabled. Default: `true`. |
+| `canales.email` | boolean | Send an email notification when triggered. Default: `false`. |
+| `canales.whatsapp` | boolean | WhatsApp notification channel. Default: `true`. |
+| `canales.sms` | boolean | SMS notification channel. Default: `false`. |
+| `canales.push` | boolean | Push notification channel. Default: `true`. |
+| `ultimaNotificacion` | Date \| `null` | Timestamp of the most recent triggered notification. |
+| `createdAt` | Date | Alert creation timestamp. |
+| `updatedAt` | Date | Last modification timestamp. |
+
+---
+
+## GET /api/alertas/usuario/:usuarioId
+
+Returns all alerts belonging to a specific user, with buyer details (`nombreempresa`, `tipo`) populated.
+
+**Auth:** Owner of the alerts or admin. Returns `403` if neither condition is met.
+
+```bash
+curl -X GET https://your-backend.up.railway.app/api/alertas/usuario/64f1a2b3c4d5e6f7a8b9c0d1 \
+  -H "Cookie: auth_token=<your_token>"
+```
+
+**Response `200 OK`**
+
+```json
+[
+  {
+    "_id": "65a3b4c5d6e7f8a9b0c1d2e3",
+    "usuario": "64f1a2b3c4d5e6f7a8b9c0d1",
+    "comprador": {
+      "_id": "64f9a8b7c6d5e4f3a2b1c0d9",
+      "nombreempresa": "Café del Sur S.A.S.",
+      "tipo": "exportador"
+    },
+    "precioMinimo": 1250000,
+    "activa": true,
+    "canales": {
+      "whatsapp": true,
+      "sms": false,
+      "email": true,
+      "push": true
+    },
+    "ultimaNotificacion": "2024-08-14T10:00:00.000Z",
+    "createdAt": "2024-07-01T08:00:00.000Z",
+    "updatedAt": "2024-08-14T10:00:00.000Z"
+  }
+]
+```
+
+---
+
+## GET /api/alertas/verificar/:usuarioId
+
+Returns only **active** alerts for a user whose `ultimaNotificacion` falls within the last 60 seconds. Intended for real-time UI polling — call this endpoint periodically to detect freshly triggered alerts and display in-app notifications without a WebSocket connection.
+
+**Auth:** Owner of the alerts or admin.
+
+```bash
+curl -X GET https://your-backend.up.railway.app/api/alertas/verificar/64f1a2b3c4d5e6f7a8b9c0d1 \
+  -H "Cookie: auth_token=<your_token>"
+```
+
+**Response `200 OK`** — Array of recently triggered alert objects (may be empty if none fired in the last 60 seconds). Buyer's `nombreempresa` is populated.
+
+---
+
+## GET /api/alertas/:id
+
+Returns a single alert by its ID. The owner's name/surname and the buyer's company name are populated.
+
+**Auth:** Owner of the alert or admin.
+
+```bash
+curl -X GET https://your-backend.up.railway.app/api/alertas/65a3b4c5d6e7f8a9b0c1d2e3 \
+  -H "Cookie: auth_token=<your_token>"
+```
+
+**Response `200 OK`** — Single alert object with `usuario` (`nombre`, `apellido`) and `comprador` (`nombreempresa`) populated.
+
+**Response `404 Not Found`** — If no alert exists with the given `:id`.
+
+---
+
+## POST /api/alertas
+
+Creates a new price alert. The authenticated user's ID is automatically used as the `usuario` field — you do not need to include it in the body.
+
+**Auth:** `productor` or `admin`
+
+### Request body
+
+<ParamField body="comprador" type="string (ObjectId)">
+  The MongoDB ObjectId of a specific buyer to watch. Omit this field (or set to `null`) to watch all buyers simultaneously.
+</ParamField>
+
+<ParamField body="precioMinimo" type="number" required>
+  The minimum purchase price threshold that triggers the alert, in Colombian pesos (COP). Must be a positive number.
+</ParamField>
+
+<ParamField body="canales" type="object">
+  Notification channel preferences. All sub-fields are boolean. Defaults: `whatsapp: true`, `sms: false`, `email: false`, `push: true`.
+</ParamField>
+
+<ParamField body="canales.email" type="boolean">
+  Send an email when the alert triggers. Default: `false`.
+</ParamField>
+
+<ParamField body="canales.whatsapp" type="boolean">
+  Send a WhatsApp message when the alert triggers. Default: `true`.
+</ParamField>
+
+<ParamField body="canales.sms" type="boolean">
+  Send an SMS when the alert triggers. Default: `false`.
+</ParamField>
+
+<ParamField body="canales.push" type="boolean">
+  Send a push notification when the alert triggers. Default: `true`.
+</ParamField>
+
+```bash
+curl -X POST https://your-backend.up.railway.app/api/alertas \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<your_token>" \
+  -d '{
+    "comprador": "64f9a8b7c6d5e4f3a2b1c0d9",
+    "precioMinimo": 1250000,
+    "canales": { "email": true, "whatsapp": true, "sms": false, "push": false }
+  }'
+```
+
+To watch **all buyers** (no specific buyer), omit the `comprador` field:
+
+```json
+{
+  "precioMinimo": 1200000,
+  "canales": { "email": true }
+}
+```
+
+**Response `201 Created`** — Returns the newly created alert object.
+
+**Response `400 Bad Request`** — If `precioMinimo` is missing or the payload is malformed.
+
+---
+
+## PUT /api/alertas/:id
+
+Updates an existing alert's `precioMinimo`, `comprador`, `canales`, or `activa` state. Only the alert owner or an admin may update an alert.
+
+**Auth:** Owner of the alert or admin.
+
+<ParamField body="precioMinimo" type="number">
+  New minimum price threshold.
+</ParamField>
+
+<ParamField body="comprador" type="string (ObjectId)">
+  Change the watched buyer. Pass `null` to revert to watching all buyers.
+</ParamField>
+
+<ParamField body="canales" type="object">
+  Updated channel preferences object.
+</ParamField>
+
+<ParamField body="activa" type="boolean">
+  Directly set the active state. Prefer the dedicated toggle endpoint for on/off toggling.
+</ParamField>
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/alertas/65a3b4c5d6e7f8a9b0c1d2e3 \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<your_token>" \
+  -d '{"precioMinimo": 1300000, "canales": {"email": true, "whatsapp": false}}'
+```
+
+**Response `200 OK`** — Returns the updated alert object.
+
+---
+
+## PUT /api/alertas/:id/toggle
+
+Toggles the `activa` flag on an alert. If the alert is currently active, it becomes inactive, and vice versa.
+
+**Auth:** Owner of the alert or admin.
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/alertas/65a3b4c5d6e7f8a9b0c1d2e3/toggle \
+  -H "Cookie: auth_token=<your_token>"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "message": "Alerta activa",
+  "alerta": {
+    "_id": "65a3b4c5d6e7f8a9b0c1d2e3",
+    "activa": true,
+    "precioMinimo": 1300000,
+    "...": "..."
+  }
+}
+```
+
+The `message` value is `"Alerta activa"` when toggled on, or `"Alerta desactivada"` when toggled off.
+
+---
+
+## DELETE /api/alertas/:id
+
+Permanently deletes an alert. This action is irreversible.
+
+**Auth:** Owner of the alert or admin.
+
+```bash
+curl -X DELETE https://your-backend.up.railway.app/api/alertas/65a3b4c5d6e7f8a9b0c1d2e3 \
+  -H "Cookie: auth_token=<your_token>"
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Alerta eliminada correctamente" }
+```
+
+**Response `403 Forbidden`** — If the authenticated user is not the owner and not an admin.
+
+**Response `404 Not Found`** — If no alert exists with the given `:id`.

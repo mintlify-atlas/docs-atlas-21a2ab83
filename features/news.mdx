@@ -1,0 +1,144 @@
+---
+title: "Auto-Aggregated Coffee News Feed"
+sidebarTitle: "News"
+description: "CoffePrice automatically fetches and summarizes coffee-sector news from NewsAPI, GNews, TheNewsAPI, and NewsData. Admins can trigger manual generation via the API."
+---
+
+CoffePrice maintains a continuously refreshed news feed focused on the Colombian coffee sector. Articles are sourced from up to four external news APIs, filtered for coffee-sector relevance, de-duplicated, and either adapted locally (default) or summarized by GPT-4o-mini (AI mode). The result is a curated feed producers and buyers can browse directly in the platform — no external links or sign-ups required.
+
+## News Sources
+
+<CardGroup cols={2}>
+  <Card title="NewsAPI" icon="newspaper">
+    Configured via `NEWSAPI_KEY`. Broad international news coverage; articles filtered to coffee-relevant topics before publication.
+  </Card>
+  <Card title="GNews" icon="globe">
+    Configured via `GNEWS_API_KEY`. European news aggregator with Spanish-language support.
+  </Card>
+  <Card title="TheNewsAPI" icon="rss">
+    Configured via `THENEWSAPI_TOKEN`. Specialty coffee and agribusiness sources. Absence of this token limits the feed to direct RSS sources only.
+  </Card>
+  <Card title="NewsData" icon="database">
+    Configured via `NEWSDATA_API_KEY`. Strong coverage of Latin American agricultural news and FNC announcements.
+  </Card>
+</CardGroup>
+
+<Note>
+  At least one API key must be configured for the news feed to populate from external sources. If no aggregator keys are set, the service falls back to direct RSS feeds in Spanish.
+</Note>
+
+## Auto-Generation
+
+News generation runs automatically on two triggers:
+
+<Steps>
+  <Step title="Boot-time generation">
+    If the environment variable `NOTICIAS_GENERAR_AL_INICIAR=true` is set, `generarNoticiasDelDia()` is called once when the Node.js server starts. This ensures fresh content is available immediately after a deployment without waiting for the next cron tick.
+  </Step>
+  <Step title="Adaptive background refresh">
+    The `asegurarNoticiasRecientes()` function runs on a background schedule (`noticiaCron.js`). It checks:
+    - Is the most recent auto-generated article older than `NOTICIAS_MAX_HORAS_SIN_ACTUALIZAR` (default: 8 hours)?
+    - Is the current inventory below `NOTICIAS_MIN_ACTIVAS` (default: 6 articles) in the last `NOTICIAS_HORAS_INVENTARIO` (default: 72 hours)?
+
+    If either condition is true, a new generation cycle fires automatically. A minimum re-check interval of 5 minutes (`NOTICIAS_MIN_INTERVALO_REVISION_MS=300000`) prevents runaway polling.
+  </Step>
+</Steps>
+
+## Environment Variables
+
+The following variables tune the news pipeline behaviour. All are optional with the defaults shown:
+
+| Variable                            | Default | Description                                                              |
+|-------------------------------------|---------|--------------------------------------------------------------------------|
+| `NEWSAPI_KEY`                       | —       | API key for newsapi.org                                                  |
+| `GNEWS_API_KEY`                     | —       | API key for gnews.io                                                     |
+| `THENEWSAPI_TOKEN`                  | —       | Token for thenewsapi.com                                                 |
+| `NEWSDATA_API_KEY`                  | —       | API key for newsdata.io                                                  |
+| `OPENAI_API_KEY`                    | —       | Required only when `NOTICIAS_MODO_ADAPTACION=ia`                         |
+| `NOTICIAS_MODO_ADAPTACION`          | `local` | `local` = rule-based adaptation; `ia` = GPT-4o-mini summarization       |
+| `NOTICIAS_GENERAR_AL_INICIAR`       | `false` | Run a generation cycle on server boot                                    |
+| `NOTICIAS_POR_CICLO`                | `3`     | Maximum new articles created per generation cycle                        |
+| `NOTICIAS_DIAS_CONSERVAR`           | `7`     | Days before auto-generated articles are deleted by `limpiarNoticiasViejas` |
+| `NOTICIAS_MAX_HORAS_FUENTE`         | `12`    | Maximum article age (hours) accepted from external sources               |
+| `NOTICIAS_MIN_ACTIVAS`              | `6`     | Minimum active articles before a refresh cycle is triggered              |
+| `NOTICIAS_HORAS_INVENTARIO`         | `72`    | Lookback window (hours) used when counting active articles               |
+| `NOTICIAS_BLOQUEAR_REPETIDAS_HORAS` | `168`   | Hours a source URL is blocked after being published (prevents recycling) |
+| `NOTICIAS_HORAS_REVISAR_DUPLICADOS` | `48`    | Lookback window (hours) for in-memory duplicate checks during generation |
+
+## Relevance Filtering
+
+Before any article is saved, the pipeline applies several quality gates:
+
+1. **Noise filter** — articles about football, crime, entertainment, or other off-topic content are discarded using a keyword blocklist (`sub17`, `futbol`, `asesinato`, `farandula`, etc.).
+2. **Coffee relevance check** — the article must contain at least one strong coffee-sector signal (e.g. `"precio del cafe"`, `"federacion nacional de cafeteros"`, `"caficultores"`, `"pergamino"`).
+3. **Forced-localization check** — if the source article does not mention El Pital or Huila, the pipeline strips any injected local references from the adaptation to prevent fake regionalization.
+4. **Duplicate detection** — Jaccard similarity is calculated across title, summary, and content tokens. Articles exceeding the similarity thresholds against recently saved content are discarded.
+5. **Source rotation** — each source URL is hashed (`sourceHash`) and blocked for `NOTICIAS_BLOQUEAR_REPETIDAS_HORAS` (default 168 h / 7 days) after publication to prevent the same article from recycling.
+
+## Admin-Only Endpoints
+
+<Warning>
+  These endpoints require a valid JWT and the `admin` role.
+</Warning>
+
+### Trigger Manual Generation
+
+```bash
+POST /api/noticias/generar-automaticas
+```
+
+Runs one full `generarNoticiasDelDia()` cycle immediately and returns the count of articles created.
+
+**Example response:**
+
+```json
+{
+  "message": "3 noticias generadas correctamente",
+  "creadas": 3
+}
+```
+
+### Clean Damaged Articles
+
+```bash
+POST /api/noticias/limpiar-danadas
+```
+
+Scans auto-generated articles for quality issues and removes those that fail validation. Damage reasons include: `tema_ajeno_al_cafe`, `contexto_local_forzado`, `titulo_desalineado`, `contenido_insuficiente`, `contenido_igual_al_resumen`.
+
+## Public Endpoints
+
+| Endpoint                | Description                              |
+|-------------------------|------------------------------------------|
+| `GET /api/noticias`     | List all published articles (paginated)  |
+| `GET /api/noticias/:id` | Get full article detail by MongoDB ID    |
+
+### Example: List News
+
+```bash
+curl https://api.coffeprice.com/api/noticias
+```
+
+**Example response:**
+
+```json
+[
+  {
+    "_id": "664c2f009b3c4d001e8f0030",
+    "titulo": "Precio del café colombiano sube por tercer día consecutivo",
+    "resumen": "El mercado cafetero registró una nueva alza impulsada por menor oferta en el sur del Huila y presión al alza en la bolsa de Nueva York.",
+    "contenido": "Los precios del café en el mercado colombiano...",
+    "categoria": "mercado",
+    "fuente": "Portafolio",
+    "imagen": "https://images.unsplash.com/photo-1611174743420-3d7df880ce32?w=800",
+    "sourceUrl": "https://www.portafolio.co/...",
+    "autoGenerada": true,
+    "publishedAt": "2025-06-01T09:00:00.000Z",
+    "createdAt": "2025-06-01T09:30:00.000Z"
+  }
+]
+```
+
+<Tip>
+  Article categories are: `mercado`, `clima`, `consejos`, `fnc`, `produccion`, `internacional`, `el_pital`. Use these to filter the feed on the frontend or build category-specific widgets.
+</Tip>

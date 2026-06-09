@@ -1,0 +1,145 @@
+---
+title: "Kaffi: AI Chatbot Assistant in CoffePrice"
+sidebarTitle: "Kaffi Chatbot"
+description: "Kaffi is CoffePrice's OpenAI-powered chatbot. It answers user questions about the platform, coffee prices, and predictions. Access it via the floating widget or the REST API."
+---
+
+Kaffi is CoffePrice's built-in conversational assistant. Designed for Colombian coffee farmers and buyers, Kaffi answers questions about the platform, helps interpret price data and predictions, guides users through common tasks like registration and alert configuration, and gives actionable recommendations in plain, warm Colombian Spanish. Kaffi is available on every page via a floating widget and can also be called directly through the REST API.
+
+## How Kaffi Works
+
+<Steps>
+  <Step title="Client sends a message">
+    The frontend posts the current conversation (`mensajes` array in OpenAI format) and an optional `contexto` object describing the current page, live price data, or prediction summaries to `POST /api/chatbot`.
+  </Step>
+  <Step title="Domain and safety checks">
+    `chatbotController.js` runs several pre-flight checks before any OpenAI call:
+
+    - **Guided response check:** common workflows (comparing prices, reading predictions, login, registration, email verification, alert setup) are handled by deterministic `obtenerRespuestaGuiada()` functions — no API call needed.
+    - **Off-topic filter:** if the message matches out-of-scope topics (football, history, medicine, programming, etc.) and does not contain any coffee/platform keywords, Kaffi responds with a polite redirect without calling OpenAI.
+    - **Offensive language filter:** a regex list of Colombian Spanish offensive terms triggers a respectful boundary message.
+  </Step>
+  <Step title="Context injection">
+    If the message passes the filters and requires OpenAI, the controller serializes the `contexto` object and appends a business summary (best price, top buyer, prediction trend, confidence score) as a second system message. This lets Kaffi give page-specific advice — e.g. "Today the lead buyer is paying 2,280,000 COP, 20,000 above FNC reference."
+  </Step>
+  <Step title="OpenAI call and response">
+    The controller calls `gpt-4o-mini` with:
+    - `max_tokens: 420`
+    - `temperature: 0.6`
+    - A curated system prompt (`SISTEMA_KAFFI`) that defines Kaffi's persona, scope, and response format (max 3 short paragraphs, always Spanish, actionable first).
+
+    The response is returned alongside a `sugerencias` array of contextual follow-up prompts.
+  </Step>
+</Steps>
+
+## System Prompt Highlights
+
+Kaffi's persona is defined in `SISTEMA_KAFFI`:
+
+> *"Sos Kaffi, el asistente de CoffePrice. Hablás en español claro, cálido y cercano. Ayudas a caficultores y compradores a usar la plataforma, entender precios, alertas, predicciones y tomar mejores decisiones."*
+
+Kaffi is explicitly scoped to:
+- CoffePrice platform guidance
+- Coffee prices, predictions, and alerts
+- Buyer comparison and selling decisions
+- Registration, login, and email verification flows
+
+Topics outside this scope (general history, politics, technology, healthcare, homework help) are declined politely with examples of what Kaffi can help with.
+
+## Configuration
+
+Kaffi requires one environment variable:
+
+| Variable         | Required | Description                                  |
+|------------------|----------|----------------------------------------------|
+| `OPENAI_API_KEY` | ✅        | OpenAI API key for `gpt-4o-mini` access      |
+
+<Warning>
+  If `OPENAI_API_KEY` is not set, guided and off-topic responses will still work (they bypass OpenAI), but any question that reaches the AI fallback will return a `500` error. Set the key in all environments where the chatbot is expected to be fully functional.
+</Warning>
+
+## Frontend Integration
+
+<Tabs>
+  <Tab title="Floating Widget">
+    The `Kaffi` React component (`kaffi.jsx`) renders as a floating button on every page of the application. Clicking it opens a chat panel pre-loaded with a greeting and contextual quick-action suggestions based on the current route (e.g. `/precios` shows "Who's paying best?", "Compare with FNC").
+  </Tab>
+  <Tab title="Sidebar Help Center">
+    Kaffi is also accessible from the sidebar help section. In this mode it launches with a help-center context, making it easier to ask general platform questions.
+  </Tab>
+  <Tab title="kaffiGuides.js">
+    The frontend ships a `kaffiGuides.js` file that maps page routes to structured step-by-step guides. When a user clicks a guide shortcut inside the widget, the guide content is rendered inline without an API call — covering tasks like "How to create an alert", "How to read a prediction", and "How to publish a price".
+  </Tab>
+</Tabs>
+
+## API Usage
+
+### Send a Message to Kaffi
+
+```bash
+POST /api/chatbot
+```
+
+**Request body:**
+
+```json
+{
+  "mensajes": [
+    { "role": "user", "content": "¿Quién está pagando mejor hoy?" }
+  ],
+  "contexto": {
+    "pagina": "/precios",
+    "datosPagina": {
+      "resumenPrecios": {
+        "mejorPrecio": 2280000,
+        "mejorComprador": "Café del Sur S.A.S.",
+        "precioFNC": 2260000,
+        "diferenciaVsFNC": 20000
+      }
+    }
+  }
+}
+```
+
+**Example response:**
+
+```json
+{
+  "respuesta": "Para elegir mejor comprador, mirá tres cosas: quién aparece con el mejor pago hoy, si ese precio es por carga o por kilo según tu café, y hace cuánto lo actualizó. Hoy va adelante Café del Sur S.A.S. con 2.280.000 pesos. Si dos compradores están parecidos, confirmá directo con el que tenga el dato más reciente.",
+  "sugerencias": [
+    "Comparar con FNC",
+    "¿Conviene vender hoy?",
+    "¿Qué debo revisar primero?"
+  ]
+}
+```
+
+The `mensajes` array follows the OpenAI chat format — each element has a `role` (`"user"` or `"assistant"`) and a `content` string. Pass the full conversation history to maintain context across turns.
+
+The optional `contexto` object can include:
+
+| Field                              | Description                                              |
+|------------------------------------|----------------------------------------------------------|
+| `pagina`                           | Current route (e.g. `"/precios"`, `"/predicciones"`)     |
+| `datosPagina.resumenPrecios`       | Current price summary (best price, top buyer, FNC diff)  |
+| `datosPagina.prediccionResumen`    | Current prediction summary (estimated price, trend, confidence) |
+| `datosPagina.historialPredicciones`| Prediction history stats (days queried, average, min, max) |
+| `ayudaPagina`                      | Page-specific help label                                 |
+| `resumenAyuda`                     | Short description of the current page context            |
+
+<Note>
+  Kaffi is available on **public routes** — no authentication token is required to call `POST /api/chatbot`. The endpoint is rate-limited at the Express layer to prevent abuse. Guided responses (no OpenAI call) are served synchronously in milliseconds; AI-backed responses depend on OpenAI latency (typically 1–3 s).
+</Note>
+
+## Contextual Suggestions
+
+Every response from Kaffi includes a `sugerencias` array of 3 follow-up prompts tailored to the current page and topic:
+
+| Context                | Example suggestions                                           |
+|------------------------|---------------------------------------------------------------|
+| Prices page            | `"Comparar con FNC"`, `"Quién paga mejor"`, `"Conviene vender hoy"` |
+| Predictions page       | `"Qué significa la confianza"`, `"Comparar con precio de hoy"`, `"¿Me conviene esperar?"` |
+| Alerts page            | `"Crear una alerta"`, `"Qué precio me conviene poner"`, `"Cómo funciona una alerta"` |
+| Login / Register       | `"No recuerdo mi contraseña"`, `"Qué tipo de cuenta me sirve"`, `"Cómo verificar el correo"` |
+
+These are rendered as clickable chips in the widget so users can continue the conversation with a single tap.

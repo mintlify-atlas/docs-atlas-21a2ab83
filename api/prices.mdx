@@ -1,0 +1,395 @@
+---
+title: "Coffee Prices API — Buyer Price Management"
+sidebarTitle: "Prices"
+description: "REST endpoints to list, create, update, and delete coffee buyer prices in CoffePrice. Public GET, authenticated POST/PUT/DELETE restricted to comprador and admin roles."
+---
+
+The Prices API is the core market-data layer of CoffePrice. It exposes the current buying prices that approved coffee buyers (`comprador`) publish for each coffee type. Producers use the public `GET` endpoints to compare offers across the market in real time. Authenticated buyers and admins use `POST`, `PUT`, and `DELETE` to manage their own price listings. Every write operation automatically logs a history entry, re-evaluates active producer price alerts, and dispatches email notifications to all active producers on the platform.
+
+**Base URL:** `/api/precios`
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/precios` | None (public) | List all approved buyer prices |
+| GET | `/api/precios/comprador/:compradorId` | None (public) | List all prices for a specific buyer |
+| POST | `/api/precios` | `comprador` or `admin` | Publish a new price |
+| PUT | `/api/precios/:id` | Owner `comprador` or `admin` | Update an existing price |
+| DELETE | `/api/precios/:id` | Owner `comprador` or `admin` | Remove a price listing |
+| GET | `/api/precio-fnc` | None (public) | Get the current scraped FNC reference price |
+
+---
+
+## GET /api/precios
+
+Returns all active price listings from approved buyers. Results are sorted by `preciocarga` descending and deduplicated so that only the highest price per buyer appears (one listing per buyer).
+
+**Authentication:** None — public, rate-limited.
+
+### Query parameters
+
+<ParamField query="tipocafe" type="string">
+  Filter results to a single coffee or product type. Omit to return all types.
+
+  Allowed values: `pergamino_seco`, `especial`, `organico`, `verde`, `pasilla`, `cacao`, `limon`
+</ParamField>
+
+### Response fields
+
+<ResponseField name="_id" type="string">
+  MongoDB ObjectId of the price document.
+</ResponseField>
+
+<ResponseField name="comprador" type="object">
+  Partial buyer profile. Only fields safe for public display are included.
+
+  <Expandable title="comprador object">
+    <ResponseField name="_id" type="string">
+      MongoDB ObjectId of the buyer (`comprador`) document.
+    </ResponseField>
+
+    <ResponseField name="nombreempresa" type="string">
+      Registered business name of the buyer.
+    </ResponseField>
+
+    <ResponseField name="direccion" type="string">
+      Physical address of the buyer.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="tipocafe" type="string">
+  Coffee or product type. One of `pergamino_seco`, `especial`, `organico`, `verde`, `pasilla`, `cacao`, `limon`.
+</ResponseField>
+
+<ResponseField name="preciocarga" type="number">
+  Buyer's offered price per load (carga) or per kilogram, depending on `unidad`.
+</ResponseField>
+
+<ResponseField name="preciokg" type="number">
+  Derived price per kilogram. For carga-based types, calculated as `preciocarga / 125`. For kg-based types (`pasilla`, `cacao`, `limon`), equals `preciocarga`.
+</ResponseField>
+
+<ResponseField name="unidad" type="string">
+  Unit of measure: `carga` for `pergamino_seco`, `especial`, and `organico`; `kg` for `pasilla`, `cacao`, and `limon`. Set automatically on save.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string (ISO 8601)">
+  Timestamp when the price was first created.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string (ISO 8601)">
+  Timestamp of the most recent update.
+</ResponseField>
+
+### Example request
+
+```bash
+curl https://api.coffeprice.com/api/precios?tipocafe=pergamino_seco
+```
+
+### Example response
+
+```json
+[
+  {
+    "_id": "665a1f2e3c4b5a6d7e8f9012",
+    "comprador": {
+      "_id": "664f8c1a2b3d4e5f6a7b8c9d",
+      "nombreempresa": "Café del Sur S.A.S.",
+      "direccion": "Calle 10 # 5-32, Pitalito, Huila"
+    },
+    "tipocafe": "pergamino_seco",
+    "preciocarga": 1850000,
+    "preciokg": 14800,
+    "unidad": "carga",
+    "createdAt": "2024-06-01T08:00:00.000Z",
+    "updatedAt": "2024-06-01T08:00:00.000Z"
+  },
+  {
+    "_id": "665a1f2e3c4b5a6d7e8f9034",
+    "comprador": {
+      "_id": "664f8c1a2b3d4e5f6a7b8caa",
+      "nombreempresa": "Compras Andinas Ltda.",
+      "direccion": "Carrera 3 # 12-45, Armenia, Quindío"
+    },
+    "tipocafe": "pergamino_seco",
+    "preciocarga": 1820000,
+    "preciokg": 14560,
+    "unidad": "carga",
+    "createdAt": "2024-06-01T07:30:00.000Z",
+    "updatedAt": "2024-06-01T07:30:00.000Z"
+  }
+]
+```
+
+---
+
+## GET /api/precios/comprador/:compradorId
+
+Returns **all** price listings published by a specific buyer. The buyer's account must be in an approved state; otherwise the API responds with `404`.
+
+**Authentication:** None — public.
+
+### Path parameters
+
+<ParamField path="compradorId" type="string" required>
+  MongoDB ObjectId of the buyer whose prices you want to retrieve.
+</ParamField>
+
+### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| 404 | Buyer not found, or buyer is not yet approved by an admin. |
+| 500 | Internal server error. |
+
+### Example request
+
+```bash
+curl https://api.coffeprice.com/api/precios/comprador/664f8c1a2b3d4e5f6a7b8c9d
+```
+
+### Example response
+
+```json
+[
+  {
+    "_id": "665a1f2e3c4b5a6d7e8f9012",
+    "comprador": {
+      "_id": "664f8c1a2b3d4e5f6a7b8c9d",
+      "nombreempresa": "Café del Sur S.A.S."
+    },
+    "tipocafe": "pergamino_seco",
+    "preciocarga": 1850000,
+    "preciokg": 14800,
+    "unidad": "carga",
+    "createdAt": "2024-06-01T08:00:00.000Z",
+    "updatedAt": "2024-06-01T08:00:00.000Z"
+  },
+  {
+    "_id": "665a1f2e3c4b5a6d7e8f9056",
+    "comprador": {
+      "_id": "664f8c1a2b3d4e5f6a7b8c9d",
+      "nombreempresa": "Café del Sur S.A.S."
+    },
+    "tipocafe": "especial",
+    "preciocarga": 2100000,
+    "preciokg": 16800,
+    "unidad": "carga",
+    "createdAt": "2024-06-01T09:15:00.000Z",
+    "updatedAt": "2024-06-01T09:15:00.000Z"
+  }
+]
+```
+
+---
+
+## POST /api/precios
+
+Creates a new price listing for a buyer. The authenticated user must be the owner of the `comprador` profile referenced in the request body, or an `admin`.
+
+**Authentication:** Required — `comprador` or `admin` role.
+
+After a successful save, the server:
+1. Writes a snapshot to the price history log (`HistorialPrecio`).
+2. Queries all active alerts whose `precioMinimo` is less than or equal to the new `preciocarga` and sends email notifications to the alert owners.
+3. Dispatches an email notification about the new listing to every active producer on the platform.
+
+### Duplicate prevention
+
+If an identical combination of `comprador`, `tipocafe`, and `preciocarga` was already submitted within the last **60 seconds**, the server skips the insert and returns the existing document with HTTP `200` instead of `201`.
+
+### Request body
+
+<ParamField body="comprador" type="string" required>
+  MongoDB ObjectId of the buyer (`comprador`) profile to associate this price with. The authenticated user must own this profile, or be an admin.
+</ParamField>
+
+<ParamField body="preciocarga" type="number" required>
+  Offered price. Must be a finite number greater than `0`. Represents price per carga for `pergamino_seco`, `especial`, and `organico`; price per kg for `pasilla`, `cacao`, and `limon`.
+</ParamField>
+
+<ParamField body="tipocafe" type="string" required>
+  Type of coffee or agricultural product.
+
+  Allowed values: `pergamino_seco`, `especial`, `organico`, `verde`, `pasilla`, `cacao`, `limon`
+</ParamField>
+
+### Responses
+
+| Status | Description |
+|--------|-------------|
+| 201 | Price created successfully. Returns the new price document. |
+| 200 | Duplicate detected within the 60-second window. Returns the existing document. |
+| 400 | Missing or invalid fields. |
+| 403 | Authenticated user does not own the buyer profile, or the buyer is not approved. |
+| 404 | Buyer not found. |
+
+### Example request
+
+```bash
+curl -X POST https://api.coffeprice.com/api/precios \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "comprador": "664f8c1a2b3d4e5f6a7b8c9d",
+    "tipocafe": "pergamino_seco",
+    "preciocarga": 1850000
+  }'
+```
+
+### Example response
+
+```json
+{
+  "_id": "665a1f2e3c4b5a6d7e8f9012",
+  "comprador": "664f8c1a2b3d4e5f6a7b8c9d",
+  "tipocafe": "pergamino_seco",
+  "preciocarga": 1850000,
+  "preciokg": 14800,
+  "unidad": "carga",
+  "createdAt": "2024-06-01T08:00:00.000Z",
+  "updatedAt": "2024-06-01T08:00:00.000Z"
+}
+```
+
+---
+
+## PUT /api/precios/:id
+
+Updates an existing price listing. The authenticated user must be the owner of the buyer profile linked to the price, or an `admin`.
+
+**Authentication:** Required — owner `comprador` or `admin` role.
+
+After saving, the server writes a new history snapshot and re-runs the alert and producer-notification pipeline, identical to `POST /api/precios`.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  MongoDB ObjectId of the price document to update.
+</ParamField>
+
+### Request body
+
+<ParamField body="preciocarga" type="number">
+  New price value. Must be a finite number greater than `0`. Omit to leave unchanged.
+</ParamField>
+
+<ParamField body="tipocafe" type="string">
+  New coffee type. Must be one of the allowed enum values. Omit to leave unchanged.
+
+  Allowed values: `pergamino_seco`, `especial`, `organico`, `verde`, `pasilla`, `cacao`, `limon`
+</ParamField>
+
+### Responses
+
+| Status | Description |
+|--------|-------------|
+| 200 | Price updated successfully. Returns the updated price document. |
+| 400 | Invalid field value. |
+| 403 | Authenticated user does not own the buyer profile, or the buyer is not approved. |
+| 404 | Price or associated buyer not found. |
+
+### Example request
+
+```bash
+curl -X PUT https://api.coffeprice.com/api/precios/665a1f2e3c4b5a6d7e8f9012 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "preciocarga": 1900000
+  }'
+```
+
+### Example response
+
+```json
+{
+  "_id": "665a1f2e3c4b5a6d7e8f9012",
+  "comprador": "664f8c1a2b3d4e5f6a7b8c9d",
+  "tipocafe": "pergamino_seco",
+  "preciocarga": 1900000,
+  "preciokg": 15200,
+  "unidad": "carga",
+  "createdAt": "2024-06-01T08:00:00.000Z",
+  "updatedAt": "2024-06-01T10:42:00.000Z"
+}
+```
+
+---
+
+## DELETE /api/precios/:id
+
+Permanently removes a price listing. The authenticated user must be the owner of the buyer profile linked to the price, or an `admin`.
+
+**Authentication:** Required — owner `comprador` or `admin` role.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  MongoDB ObjectId of the price document to delete.
+</ParamField>
+
+### Responses
+
+| Status | Description |
+|--------|-------------|
+| 200 | Price deleted successfully. |
+| 403 | Authenticated user does not own the buyer profile, or the buyer is not approved. |
+| 404 | Price or associated buyer not found. |
+| 500 | Internal server error. |
+
+### Example request
+
+```bash
+curl -X DELETE https://api.coffeprice.com/api/precios/665a1f2e3c4b5a6d7e8f9012 \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example response
+
+```json
+{
+  "message": "Precio eliminado correctamente"
+}
+```
+
+---
+
+## GET /api/precio-fnc
+
+Returns the current FNC (Federación Nacional de Cafeteros) reference price served from an in-memory cache. This price is scraped automatically by a background job and refreshed on a schedule.
+
+**Authentication:** None — public, rate-limited.
+
+If the cache is populated and fresh, the response is returned immediately. If the cache is stale, a background refresh is triggered and the last known value is returned instantly. If the cache is empty and a refresh is in progress, the server responds with HTTP `202`. If no price can be obtained at all, the server responds with HTTP `503`.
+
+### Response fields
+
+<ResponseField name="precio" type="number | null">
+  Current FNC reference price in Colombian pesos (COP). `null` if unavailable.
+</ResponseField>
+
+<ResponseField name="fuente" type="string | null">
+  Source identifier for the scraped value. `null` if unavailable.
+</ResponseField>
+
+<ResponseField name="actualizadoEn" type="string | null">
+  Human-readable timestamp of the last successful scrape, formatted in the `America/Bogota` timezone. `null` if unavailable.
+</ResponseField>
+
+### Example request
+
+```bash
+curl https://api.coffeprice.com/api/precio-fnc
+```
+
+### Example response
+
+```json
+{
+  "precio": 1842000,
+  "fuente": "fnc_scraper",
+  "actualizadoEn": "1/6/2024, 9:05:00 a. m."
+}
+```

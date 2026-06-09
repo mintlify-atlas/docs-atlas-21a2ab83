@@ -1,0 +1,167 @@
+---
+title: "Interactive Buyer Map for Coffee Producers"
+sidebarTitle: "Buyer Map"
+description: "CoffePrice's buyer map shows approved coffee buyers across Huila municipalities with approximate coordinates, current prices, and business hours on an interactive Mapbox map."
+---
+
+The buyer map gives coffee producers a geographic overview of where they can sell their harvest. Every approved buyer in the system appears as a pin on a Mapbox map, enriched with the buyer's most recent posted price, business hours, and service offerings. Because CoffePrice protects buyer contact information from the general public, exact addresses and phone numbers are hidden — only the company name, municipality zone, and commercial data are shown.
+
+## Supported Municipalities
+
+The map covers the coffee-growing municipalities of southern Huila. Buyers outside this list fall back to the El Pital center coordinates.
+
+<CardGroup cols={2}>
+  <Card title="Northern Zone" icon="location-dot">
+    - El Pital (2.266205°N, -75.805401°W)
+    - La Argentina (2.1962°N, -75.9805°W)
+    - Tarqui (2.1107°N, -75.8238°W)
+    - Elías (2.0131°N, -75.9395°W)
+  </Card>
+  <Card title="Southern Zone" icon="location-dot">
+    - Pitalito (1.8537°N, -76.0517°W)
+    - Acevedo (1.8043°N, -75.8893°W)
+    - Suaza (1.9767°N, -75.7947°W)
+    - Palestina (1.7238°N, -76.1347°W)
+    - Saladoblanco (1.9933°N, -76.0457°W)
+    - Isnos (1.927°N, -76.2148°W)
+  </Card>
+</CardGroup>
+
+## How Coordinates Work
+
+No GPS data is collected from buyers. Instead, CoffePrice uses a **deterministic approximate offset** algorithm to place each buyer near their municipality center without revealing an exact address:
+
+```javascript
+function generarCoordenadasAproximadas(comprador = {}) {
+  const claveMunicipio = normalizarClaveMunicipio(comprador.municipio || "");
+  const centro = CENTROS_MUNICIPIO[claveMunicipio] || CENTROS_MUNICIPIO["el pital"];
+
+  // Hash seeded from company name + address + municipality
+  const semilla = hashDeterministico(
+    `${comprador.nombreempresa || ""}|${comprador.direccion || ""}|${comprador.municipio || ""}`
+  );
+
+  const offsetLat = ((semilla % 1000) / 1000 - 0.5) * 0.018;
+  const offsetLng = (((Math.floor(semilla / 1000)) % 1000) / 1000 - 0.5) * 0.018;
+
+  return {
+    latitud: Number((centro[0] + offsetLat).toFixed(6)),
+    longitud: Number((centro[1] + offsetLng).toFixed(6)),
+    coordenadasEstimadas: true,
+  };
+}
+```
+
+Key properties of this approach:
+
+- **Deterministic:** the same buyer always gets the same pin location (based on company name + address hash).
+- **Bounded offset:** maximum ±0.009° in each axis (~1 km), keeping pins visibly within the correct municipality zone.
+- **No reverse-lookup possible:** the hash is one-way; the original address cannot be recovered from coordinates.
+- **`coordenadasEstimadas: true`** is always returned in the API response so clients can display an appropriate disclaimer.
+
+## Privacy Model
+
+CoffePrice applies a tiered visibility model for buyer details:
+
+<Tabs>
+  <Tab title="Public / Producer view">
+    - Company name, municipality zone, type of business, hours, description, services, reference price, and coffee type are all visible.
+    - `direccion` → `null`
+    - `telefono` → `null`
+    - `contactoRestringido: true` is set to signal the frontend to show a "contact restricted" badge.
+    - Exact GPS coordinates are never stored or returned — only the approximate offset values above.
+  </Tab>
+  <Tab title="Admin / Owner view">
+    - Full buyer document returned as-is from MongoDB, including raw `direccion`, `telefono`, and all internal fields.
+    - Accessible via `GET /api/comprador/:id` when authenticated as the owner buyer or an admin.
+  </Tab>
+</Tabs>
+
+## What's Shown on the Map
+
+The `/mapa` endpoint returns a sanitized array where each element contains:
+
+| Field                 | Type    | Description                                          |
+|-----------------------|---------|------------------------------------------------------|
+| `_id`                 | string  | Buyer MongoDB ID                                     |
+| `nombreempresa`       | string  | Company name                                         |
+| `tipoempresa`         | string  | Business type (e.g. `"cooperativa"`, `"independiente"`) |
+| `municipio`           | string  | Municipality name                                    |
+| `ubicacionGeneral`    | string  | Human-readable zone label (e.g. `"Zona de Pitalito"`) |
+| `horarioApertura`     | string  | Opening time                                         |
+| `horarioCierre`       | string  | Closing time                                         |
+| `descripcion`         | string  | Business description                                 |
+| `servicios`           | array   | List of offered services                             |
+| `precioReferencia`    | number  | Most recent `preciocarga` posted                     |
+| `precioKgReferencia`  | number  | Corresponding `preciokg`                             |
+| `tipocafe`            | string  | Coffee type for the reference price                  |
+| `unidadPrecio`        | string  | `"carga"` or `"kg"`                                  |
+| `latitud`             | number  | Approximate latitude                                 |
+| `longitud`            | number  | Approximate longitude                                |
+| `coordenadasEstimadas`| boolean | Always `true` — signals approximate placement        |
+| `contactoRestringido` | boolean | Always `true` in public responses                    |
+
+## Approval Requirement
+
+Only buyers with `estadoRevision: "aprobado"` (or legacy records without the `estadoRevision` field at all) appear on the map. The backend query is:
+
+```javascript
+CompradorModel.find({
+  $or: [
+    { estadoRevision: "aprobado" },
+    { estadoRevision: { $exists: false } },
+    { estadoRevision: null },
+  ],
+})
+```
+
+After the database query, a secondary check (`esCompradorAprobado`) validates the associated user account is also active before including the buyer in the response.
+
+## Map API Endpoint
+
+```bash
+GET /api/comprador/mapa
+```
+
+Public endpoint — no authentication required. Rate-limited at the Express layer.
+
+**Example request:**
+
+```bash
+curl https://api.coffeprice.com/api/comprador/mapa
+```
+
+**Example sanitized buyer object:**
+
+```json
+{
+  "_id": "664a1e009b3c4d001e8f0010",
+  "nombreempresa": "Café del Sur S.A.S.",
+  "tipoempresa": "cooperativa",
+  "municipio": "El Pital",
+  "ubicacionGeneral": "Zona de El Pital",
+  "direccion": null,
+  "telefono": null,
+  "horarioApertura": "07:00",
+  "horarioCierre": "17:00",
+  "descripcion": "Compramos café pergamino seco y especial de alta calidad.",
+  "servicios": ["Pesaje", "Análisis de humedad", "Pago inmediato"],
+  "contactoRestringido": true,
+  "latitud": 2.269871,
+  "longitud": -75.802134,
+  "coordenadasEstimadas": true,
+  "precioReferencia": 2280000,
+  "precioKgReferencia": 18240,
+  "tipocafe": "pergamino_seco",
+  "unidadPrecio": "carga",
+  "precioActualizadoAt": "2025-06-01T13:04:11.000Z"
+}
+```
+
+## Frontend Implementation
+
+The map UI is built with **React**, **Mapbox GL JS**, and **react-map-gl**. Each buyer is rendered as a custom marker using the approximate coordinates. Clicking a pin opens a popup with the buyer's commercial info and a link to their detail page. Producers can filter pins by coffee type or municipality directly on the map interface.
+
+<Tip>
+  The `coordenadasEstimadas: true` flag should always be surfaced to the user. The frontend displays a tooltip explaining that pin locations are approximate and producers should confirm the address before traveling to sell.
+</Tip>

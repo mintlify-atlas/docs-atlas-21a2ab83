@@ -1,0 +1,174 @@
+---
+title: "POST /api/chatbot — Kaffi AI Assistant"
+sidebarTitle: "Chatbot"
+description: "Send a message to Kaffi, the CoffePrice AI assistant powered by OpenAI. Public endpoint. Requires OPENAI_API_KEY. Returns a plain-text response."
+---
+
+Kaffi is the CoffePrice AI assistant, powered by OpenAI's `gpt-4o-mini` model. It helps coffee producers and buyers navigate the platform, interpret price predictions, understand alerts, and make better selling decisions — all in plain, friendly Spanish.
+
+The chatbot accepts a message history array so multi-turn conversations are supported. Before forwarding to OpenAI, the controller builds a detailed system prompt that grounds Kaffi in the CoffePrice context, applies an off-topic filter (blocking requests about unrelated subjects like history or sports), and detects offensive language. Certain high-frequency queries (e.g. "who pays the best price today?") are answered with pre-built guided responses, bypassing the OpenAI call entirely for lower latency.
+
+**Endpoint:** `POST /api/chatbot`
+
+**Auth:** None (public)
+
+**Rate limiting:** This endpoint is rate-limited. Exceeding the limit returns `429 Too Many Requests`.
+
+<Warning>
+  `OPENAI_API_KEY` must be set as an environment variable on your backend server. If the variable is missing or invalid, the endpoint returns `500 Internal Server Error` with `{ "message": "Error al consultar a Kaffi", "error": "..." }`. Verify the key is correctly configured in your Railway (or equivalent) deployment settings before going live.
+</Warning>
+
+---
+
+## Request body
+
+<ParamField body="mensajes" type="array" required>
+  An array of message objects following the OpenAI chat format. Each object must have a `role` (`"user"` or `"assistant"`) and a `content` string. The last element in the array is treated as the current user message. Minimum one element required.
+</ParamField>
+
+<ParamField body="contexto" type="object">
+  Optional client-side context object. When provided, the controller serialises it into a secondary system message sent to OpenAI, enabling more relevant, page-aware responses. Useful sub-fields:
+
+  - `pagina` — current route string (e.g. `"/precios"`, `"/alertas"`, `"/predicciones"`)
+  - `datosPagina.resumenPrecios` — object with `mejorPrecio`, `mejorComprador`, `precioFNC`, `diferenciaVsFNC`
+  - `datosPagina.prediccionResumen` — object with `precioEstimado`, `tendencia`, `confianza`
+  - `datosPagina.historialPredicciones` — object with `diasConsultados`, `promedio`, `minimo`, `maximo`, `confianzaPromedio`
+</ParamField>
+
+---
+
+## Response fields
+
+<ResponseField name="respuesta" type="string">
+  Kaffi's plain-text reply, always in Spanish and capped at 3 short paragraphs (approximately 420 tokens).
+</ResponseField>
+
+<ResponseField name="sugerencias" type="array of strings">
+  Up to 3 suggested follow-up questions based on the current page context and the content of the user's message. Intended for display as quick-reply chips in the chat UI.
+</ResponseField>
+
+---
+
+## Example
+
+```bash
+curl -X POST https://your-backend.up.railway.app/api/chatbot \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mensajes": [
+      { "role": "user", "content": "What is the current FNC price?" }
+    ],
+    "contexto": {
+      "pagina": "/precios",
+      "datosPagina": {
+        "resumenPrecios": {
+          "mejorPrecio": 1320000,
+          "mejorComprador": "Café del Sur S.A.S.",
+          "precioFNC": 1290000,
+          "diferenciaVsFNC": 30000
+        }
+      }
+    }
+  }'
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "respuesta": "El precio FNC hoy es de referencia para comparar lo que ofrecen los compradores. En este momento el mejor pago está 30,000 pesos por encima de la referencia FNC, lo que es una buena señal. Antes de confirmar, verifique que el tipo de café y la unidad de medida coincidan con lo que usted tiene disponible.",
+  "sugerencias": [
+    "Comparar con FNC",
+    "Quien paga mejor",
+    "Me conviene vender hoy"
+  ]
+}
+```
+
+**Response `400 Bad Request`** — If `mensajes` is missing or not an array.
+
+```json
+{ "message": "mensajes invalidos" }
+```
+
+**Response `500 Internal Server Error`** — If `OPENAI_API_KEY` is not configured or the OpenAI API returns an error.
+
+```json
+{
+  "message": "Error al consultar a Kaffi",
+  "error": "<error detail>"
+}
+```
+
+---
+
+## Off-topic and content moderation
+
+The controller applies two automatic filters before reaching the OpenAI API:
+
+- **Off-topic filter:** If the user's message matches keywords unrelated to coffee, prices, or the platform (e.g. "segunda guerra mundial", "futbol", "javascript") and contains no coffee or platform keywords, Kaffi returns a polite redirect response without consuming an OpenAI API call.
+- **Offensive language filter:** A list of patterns detects offensive text. Kaffi responds respectfully, sets a boundary, and redirects to platform help.
+
+---
+
+## POST /api/contacto
+
+Sends a contact form email to the CoffePrice support address via Gmail/Nodemailer. The email is delivered to the `EMAIL_USER` environment variable address, with `replyTo` set to the sender's email so support staff can reply directly.
+
+**Auth:** None (public)
+
+**Rate limiting:** Protected by `contactLimiter` middleware. Exceeding the limit returns `429 Too Many Requests`.
+
+### Request body
+
+<ParamField body="nombre" type="string" required>
+  Full name of the sender. Maximum 120 characters.
+</ParamField>
+
+<ParamField body="correo" type="string" required>
+  Sender's email address. Must pass the regex `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`. Used as the `replyTo` address in the outgoing email.
+</ParamField>
+
+<ParamField body="asunto" type="string">
+  Email subject line. Optional. Maximum 180 characters. Newline characters are stripped automatically.
+</ParamField>
+
+<ParamField body="mensaje" type="string" required>
+  The message body. Maximum 4000 characters. All user-supplied content is HTML-escaped before being included in the email.
+</ParamField>
+
+```bash
+curl -X POST https://your-backend.up.railway.app/api/contacto \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "María Gómez",
+    "correo": "maria@example.com",
+    "asunto": "Consulta sobre alertas de precio",
+    "mensaje": "Hola, quisiera saber cómo configurar una alerta para un comprador específico."
+  }'
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Correo enviado correctamente." }
+```
+
+**Response `400 Bad Request`** — If required fields are missing, the email format is invalid, or a field exceeds its length limit.
+
+```json
+{ "error": "Correo invalido." }
+```
+
+**Response `500 Internal Server Error`** — If Nodemailer fails to deliver the email (e.g. invalid `EMAIL_USER`/`EMAIL_PASS` credentials, Gmail quota exceeded).
+
+```json
+{ "error": "No se pudo enviar el correo. Intenta mas tarde." }
+```
+
+### Required environment variables
+
+| Variable | Description |
+|---|---|
+| `EMAIL_USER` | Gmail address used as both the sender and the recipient for contact form submissions. |
+| `EMAIL_PASS` | Gmail app password (not your account password). Generate one under your Google account's security settings. |

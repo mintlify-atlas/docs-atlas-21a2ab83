@@ -1,0 +1,289 @@
+---
+title: "Users API — Profile and Account Management"
+sidebarTitle: "Users"
+description: "REST endpoints for user profile updates, password changes, account suspension, reactivation, and admin-level user management in CoffePrice."
+---
+
+The Users API lets authenticated users manage their own profiles, change passwords, and control their account lifecycle (suspend, reactivate, or soft-delete). Admin users gain additional endpoints to list all users, update any account, reset any password, change any user's status, or permanently delete records.
+
+**Base URL:** `/api/usuario`
+
+**Authentication:** All endpoints require a valid session cookie (`auth_token`) obtained after login. Requests without a valid token receive `401 Unauthorized`.
+
+---
+
+## GET /api/usuario
+
+Returns a list of all registered users. Sensitive fields (`password`, recovery codes, and verification tokens) are automatically stripped from every response.
+
+**Auth:** Admin only
+
+```bash
+curl -X GET https://your-backend.up.railway.app/api/usuario \
+  -H "Cookie: auth_token=<your_token>"
+```
+
+**Response `200 OK`**
+
+```json
+[
+  {
+    "_id": "64f1a2b3c4d5e6f7a8b9c0d1",
+    "nombre": "Carlos",
+    "apellido": "Ramírez",
+    "email": "carlos@example.com",
+    "celular": "3001234567",
+    "rol": "productor",
+    "estado": "activo",
+    "ultimaConexion": "2024-08-15T14:30:00.000Z",
+    "createdAt": "2024-01-10T08:00:00.000Z",
+    "updatedAt": "2024-08-15T14:30:00.000Z"
+  }
+]
+```
+
+---
+
+## PUT /api/usuario/perfil
+
+Updates the authenticated user's own profile. Only `nombre`, `apellido`, and `celular` may be changed through this endpoint.
+
+**Auth:** Own account
+
+### Validation rules
+
+- `nombre` and `apellido` must contain only letters, including Spanish accented characters (`á é í ó ú Á É Í Ó Ú ñ Ñ ü Ü`) and spaces. Digits or special characters return `400`.
+- `celular` is optional and has no format restriction.
+
+### Request body
+
+<ParamField body="nombre" type="string" required>
+  First name. Must contain only letters and spaces (including Spanish accented characters).
+</ParamField>
+
+<ParamField body="apellido" type="string" required>
+  Last name. Must contain only letters and spaces (including Spanish accented characters).
+</ParamField>
+
+<ParamField body="celular" type="string">
+  Mobile phone number. Optional — any format accepted.
+</ParamField>
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/usuario/perfil \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<your_token>" \
+  -d '{"nombre": "Carlos", "apellido": "Ramírez", "celular": "3001234567"}'
+```
+
+**Response `200 OK`** — Returns the updated user object (without password or verification fields).
+
+**Response `400 Bad Request`** — If `nombre` or `apellido` contain non-letter characters.
+
+---
+
+## PUT /api/usuario/password
+
+Changes the authenticated user's own password. Requires the current password for verification before the new password is saved.
+
+**Auth:** Own account
+
+### Validation rules
+
+`passwordnueva` must satisfy:
+
+```
+/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{10,}$/
+```
+
+At least 10 characters, one lowercase letter, one uppercase letter, and one digit. Passwords that do not match this pattern return `400` before any database lookup is performed.
+
+### Request body
+
+<ParamField body="passwordactual" type="string" required>
+  The user's current password. Used for verification via bcrypt compare.
+</ParamField>
+
+<ParamField body="passwordnueva" type="string" required>
+  The new password. Minimum 10 characters, must include at least one uppercase letter, one lowercase letter, and one digit.
+</ParamField>
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/usuario/password \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<your_token>" \
+  -d '{"passwordactual": "OldPass123", "passwordnueva": "NewSecure456"}'
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Contraseña Actualizada" }
+```
+
+**Response `400 Bad Request`** — If `passwordnueva` fails the regex, or if `passwordactual` does not match the stored hash.
+
+---
+
+## DELETE /api/usuario/perfil
+
+Soft-deletes the authenticated user's own account by setting `estado` to `"eliminado"`. The record is retained in the database. Authentication cookies (`auth_token` and `connect.sid`) are cleared on success.
+
+**Auth:** Own account
+
+```bash
+curl -X DELETE https://your-backend.up.railway.app/api/usuario/perfil \
+  -H "Cookie: auth_token=<your_token>"
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Tu cuenta fue eliminada correctamente" }
+```
+
+---
+
+## PUT /api/usuario/suspender
+
+Self-suspends the authenticated user's own account by setting `estado` to `"suspendido"`. The account can be reactivated later via `PUT /api/usuario/reactivar`.
+
+**Auth:** Own account
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/usuario/suspender \
+  -H "Cookie: auth_token=<your_token>"
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Tu cuenta fue suspendida. Puedes reactivarla cuando quieras." }
+```
+
+---
+
+## PUT /api/usuario/reactivar
+
+Reactivates a previously self-suspended account by setting `estado` back to `"activo"`.
+
+**Auth:** Own account
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/usuario/reactivar \
+  -H "Cookie: auth_token=<your_token>"
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Cuenta reactivada correctamente", "estado": "activo" }
+```
+
+---
+
+## Admin-only endpoints
+
+All endpoints in this section require the authenticated user to have `rol: "admin"`.
+
+---
+
+### PUT /api/usuario/:id/estado
+
+Changes the `estado` of any user. When the target user has `rol: "comprador"`, this endpoint also syncs the linked buyer record's `estadoRevision` and sends an email notification.
+
+**Accepted `estado` values:** `activo` · `pendiente` · `rechazado` · `eliminado` · `suspendido`
+
+<ParamField body="estado" type="string" required>
+  The new account status. Must be one of: `activo`, `pendiente`, `rechazado`, `eliminado`, `suspendido`.
+</ParamField>
+
+<ParamField body="motivoRevision" type="string">
+  Reason for rejection. Only relevant when `estado` is `"rechazado"` and the user is a buyer. Included in the decision email.
+</ParamField>
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/usuario/64f1a2b3c4d5e6f7a8b9c0d1/estado \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<admin_token>" \
+  -d '{"estado": "rechazado", "motivoRevision": "Documentación incompleta."}'
+```
+
+**Response `200 OK`** — Returns the updated user object.
+
+---
+
+### PUT /api/usuario/:id/actualizar
+
+Updates any user's `nombre`, `apellido`, `celular`, `estado`, and `rol` fields. Admin-only fields (`estado`, `rol`) are only applied when the request comes from an admin.
+
+<ParamField body="nombre" type="string">
+  Updated first name.
+</ParamField>
+
+<ParamField body="apellido" type="string">
+  Updated last name.
+</ParamField>
+
+<ParamField body="celular" type="string">
+  Updated phone number.
+</ParamField>
+
+<ParamField body="estado" type="string">
+  Updated account status (admin-only field).
+</ParamField>
+
+<ParamField body="rol" type="string">
+  Updated role: `productor`, `comprador`, or `admin` (admin-only field).
+</ParamField>
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/usuario/64f1a2b3c4d5e6f7a8b9c0d1/actualizar \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<admin_token>" \
+  -d '{"nombre": "Carlos", "apellido": "Gómez", "rol": "admin"}'
+```
+
+**Response `200 OK`** — Returns the updated user object (sensitive fields stripped).
+
+---
+
+### PUT /api/usuario/:id/password
+
+Resets any user's password directly. No current-password verification is required — admin privileges are sufficient.
+
+<ParamField body="passwordnueva" type="string" required>
+  The new plaintext password to set. Will be hashed with bcrypt (10 salt rounds) before storage.
+</ParamField>
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/usuario/64f1a2b3c4d5e6f7a8b9c0d1/password \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<admin_token>" \
+  -d '{"passwordnueva": "TempReset2024"}'
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Contrasena actualizada" }
+```
+
+---
+
+### DELETE /api/usuario/:id
+
+Performs a soft-delete on any user by setting their `estado` to `"eliminado"`. The record remains in the database.
+
+```bash
+curl -X DELETE https://your-backend.up.railway.app/api/usuario/64f1a2b3c4d5e6f7a8b9c0d1 \
+  -H "Cookie: auth_token=<admin_token>"
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Usuario eliminado correctamente" }
+```
+
+**Response `404 Not Found`** — If no user exists with the given `:id`.

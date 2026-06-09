@@ -1,0 +1,129 @@
+---
+title: "Google OAuth 2.0 Sign-In for CoffePrice"
+sidebarTitle: "Google OAuth"
+description: "CoffePrice supports Google OAuth 2.0. Redirect users to /api/auth/google with a role parameter. The callback sets the auth cookie and redirects to the frontend dashboard."
+---
+
+CoffePrice integrates Google OAuth 2.0 via [Passport.js](https://www.passportjs.org/) (`passport-google-oauth20`). Users can sign in or register using their Google account without creating a separate password. The role (`productor` or `comprador`) is passed as a query parameter at the start of the flow and stored in a short-lived server-side session until the callback completes.
+
+<Warning>
+  If `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_SECRET` are not set in the server environment, **all Google OAuth routes return `503 Service Unavailable`** with the message `"El inicio de sesion con Google no esta configurado en este entorno."` No authentication will take place. Ensure both variables are configured before enabling Google sign-in.
+</Warning>
+
+---
+
+## Prerequisites
+
+The following environment variables must be set for Google OAuth to function:
+
+| Variable                | Description                                                             |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID`      | OAuth 2.0 client ID from the Google Cloud Console.                      |
+| `GOOGLE_CLIENT_SECRET`  | OAuth 2.0 client secret from the Google Cloud Console.                  |
+| `GOOGLE_CALLBACK_URL`   | The full callback URL registered in Google Cloud, e.g. `https://api.coffeprice.com/api/auth/google/callback`. |
+| `FRONTEND_URL`          | Base URL of the frontend app used for post-auth redirects, e.g. `https://coffeprice.com`. |
+| `MONGODB_URI`           | MongoDB connection string used by the OAuth session store.              |
+
+`googleAuthConfigured` is a boolean flag exported from `config/passport.js`. It evaluates to `true` only when all three Google-specific variables are present. Both `/api/auth/google` and `/api/auth/google/callback` check this flag on every request.
+
+---
+
+## OAuth Flow
+
+### Step 1 — Initiate the flow
+
+Redirect the user's browser to:
+
+```
+GET /api/auth/google?rol=productor
+```
+
+Pass `rol=comprador` instead when registering a buyer account. If `rol` is omitted it defaults to `productor`. The server saves the role in a **15-minute MongoDB-backed session** (`connect-mongo`) and then delegates to Passport, which redirects the browser to Google's consent screen requesting `profile` and `email` scopes.
+
+### Step 2 — User authenticates with Google
+
+The user selects a Google account (the `prompt=select_account` option is always set, so Google always shows the account picker) and grants permission. Google redirects back to the registered callback URL.
+
+### Step 3 — Callback and cookie issuance
+
+```
+GET /api/auth/google/callback
+```
+
+Passport receives the authorization code, exchanges it for profile data, and runs the strategy's verify callback:
+
+- **Existing user (matched by `googleId`)** — returned as-is; `ultimaConexion` is updated on the next login.
+- **Email already registered (no `googleId`)** — the existing record is linked by writing `googleId` to it, then returned.
+- **New user** — a new `Usuario` document is created. The email is pre-verified (no verification code step required). The `rol` is taken from `req.session.rolPendiente`. The initial `estado` is:
+  - `pendiente` for `comprador` accounts (business profile still required).
+  - `activo` for `productor` accounts.
+
+After the strategy resolves, `googleCallback` in `AuthController.js` runs:
+
+1. Checks account `estado` and redirects to an error URL if the account is `rechazado`, `eliminado`, or `suspendido`.
+2. Generates a JWT and sets the `auth_token` HttpOnly cookie via `fijarCookieAuth`.
+3. Redirects the browser to:
+   - `FRONTEND_URL/completar-perfil` — if `estado` is `pendiente` (comprador needs to finish profile).
+   - `FRONTEND_URL/auth/google` — for all active accounts.
+
+---
+
+## Session Details
+
+Google OAuth uses an **ephemeral session** exclusively during the OAuth handshake. This session is:
+
+- Backed by **MongoDB** via `connect-mongo`.
+- Set to expire after **15 minutes** (`ttl: 60 * 15`).
+- Cleaned up automatically by MongoDB's native TTL index (`autoRemove: "native"`).
+
+Once the callback completes and the `auth_token` JWT cookie is issued, the handshake session is no longer needed. All subsequent authentication uses the stateless JWT cookie, not the session.
+
+---
+
+## Error Handling
+
+| Scenario                              | Redirect destination                                    |
+| ------------------------------------- | ------------------------------------------------------- |
+| Passport strategy throws an error     | `FRONTEND_URL/login?error=google_auth_failed`           |
+| Strategy returns no user              | `FRONTEND_URL/login?error=google_failed`                |
+| Account state is `rechazado`          | `FRONTEND_URL/login?error=cuenta_rechazada`             |
+| Account state is `eliminado`          | `FRONTEND_URL/login?error=cuenta_eliminada`             |
+| Account state is `suspendido`         | `FRONTEND_URL/login?error=cuenta_suspendida`            |
+| `googleAuthConfigured` is `false`     | `503` JSON response (no redirect)                       |
+
+---
+
+## Google Cloud Console Configuration
+
+To register the OAuth credentials in the Google Cloud Console:
+
+1. Open **APIs & Services → Credentials** and create an **OAuth 2.0 Client ID** of type *Web application*.
+2. Under **Authorized JavaScript origins**, add:
+   - Your frontend URL (e.g., `https://coffeprice.com`)
+   - Your backend URL (e.g., `https://api.coffeprice.com`)
+3. Under **Authorized redirect URIs**, add the exact value of `GOOGLE_CALLBACK_URL` (e.g., `https://api.coffeprice.com/api/auth/google/callback`).
+4. Copy the generated **Client ID** and **Client Secret** into your server's environment.
+
+<Note>
+  In local development, add `http://localhost:<PORT>` to the authorized origins and `http://localhost:<PORT>/api/auth/google/callback` to the redirect URIs in Google Cloud Console. Remember that `secure` cookies require HTTPS in production — the `construirOpcionesCookie` helper automatically sets `secure: true` when `NODE_ENV=production`.
+</Note>
+
+---
+
+## Endpoint Reference
+
+### GET /api/auth/google
+
+Initiates the Google OAuth 2.0 authorization flow.
+
+<ParamField query="rol" type="string">
+  Role to assign if this is a new user registration. Accepted values: `productor` (default), `comprador`.
+</ParamField>
+
+**Response:** `302 Redirect` to Google's consent screen, or `503` if Google auth is not configured.
+
+### GET /api/auth/google/callback
+
+Handles the redirect from Google after the user authenticates. This URL must match `GOOGLE_CALLBACK_URL` exactly.
+
+**Response:** `302 Redirect` to the frontend dashboard or error page, with the `auth_token` cookie set on success. Returns `503` if Google auth is not configured.

@@ -1,0 +1,145 @@
+---
+title: "Producer (Caficultor) Role in CoffePrice"
+sidebarTitle: "Producer"
+description: "Producers (caficultores) are coffee farmers who use CoffePrice to track live FNC prices, view predictions, monitor buyer prices, set alerts, and review price history."
+---
+
+The **productor** role is designed for Colombian coffee farmers (caficultores) who need a single place to track the daily FNC reference price, see AI-generated next-day predictions, discover what local buyers are paying, and receive email notifications when prices cross their target threshold. After completing email verification, a producer's account is immediately active — no admin approval required.
+
+## Registration
+
+<Steps>
+  <Step title="Create an account">
+    Navigate to `/register` and fill in your name, surname, email, and password. Select **Productor / Caficultor** as your role, or leave the default (the model defaults `rol` to `"productor"`).
+  </Step>
+  <Step title="Verify your email">
+    A 6-digit verification code is sent to your email address. Enter it on the `/verify-email` screen. The code expires after a set period; use **Resend** if needed.
+  </Step>
+  <Step title="Access your dashboard">
+    Once verified your account `estado` is set to `activo` and you are redirected to `/dashboard`. No further action is required.
+  </Step>
+</Steps>
+
+<Note>
+  Producers can also register or log in via Google OAuth. When using Google, email verification is skipped because the identity is already confirmed by Google.
+</Note>
+
+## Dashboard Features
+
+Your producer dashboard at `/dashboard` brings together everything you need to make informed selling decisions:
+
+| Feature | Description |
+|---------|-------------|
+| **Live FNC price table** | Current official FNC purchase price per carga and per kg |
+| **Next-day prediction widget** | AI forecast for tomorrow's FNC price with confidence indicator |
+| **Buyer map access** | Interactive map of approved local compradores and their offered prices |
+| **Price history charts** | Historical FNC price trend charts filterable by date range |
+| **Active alert management** | Summary of your configured price alerts and their current status |
+
+## Price Alerts
+
+Price alerts let you define a minimum price threshold. When the FNC price meets or exceeds your target, CoffePrice sends you an email notification so you never miss a selling opportunity.
+
+### Creating an Alert
+
+Send a `POST` request to `/api/alertas` with your target price:
+
+```json
+{
+  "precioMinimo": 1050000,
+  "activa": true
+}
+```
+
+### Managing Existing Alerts
+
+```http
+GET    /api/alertas/usuario/:usuarioId   — list your alerts
+PUT    /api/alertas/:id                  — update threshold or toggle active
+DELETE /api/alertas/:id                  — remove an alert
+```
+
+<Tip>
+  Set your alert the evening before the trading day starts. The FNC publishes the new reference price early in the morning; having your threshold already configured means you will receive the notification the moment the price is refreshed — before most buyers have updated their own offers.
+</Tip>
+
+## Account Management
+
+All profile operations are available from the `/perfil` screen.
+
+<Tabs>
+  <Tab title="Update profile">
+    `PUT /api/usuario/perfil` — update your `nombre`, `apellido`, and `celular`.
+
+    ```json
+    {
+      "nombre": "Carlos",
+      "apellido": "Muñoz",
+      "celular": "3101234567"
+    }
+    ```
+
+    Names must contain letters only (including accented Spanish characters and spaces). Numbers and special characters are rejected.
+  </Tab>
+  <Tab title="Change password">
+    `PUT /api/usuario/password` — change your password. The new password must satisfy:
+
+    - Minimum **10 characters**
+    - At least **1 uppercase** letter
+    - At least **1 lowercase** letter
+    - At least **1 digit**
+
+    ```json
+    {
+      "passwordactual": "OldPassword1",
+      "passwordnueva": "NewPassword2025"
+    }
+    ```
+  </Tab>
+  <Tab title="Suspend account">
+    `PUT /api/usuario/suspender` — voluntarily suspend your own account. While suspended you cannot access any routes except reactivation and logout.
+
+    ```json
+    {}
+    ```
+    No request body is required.
+  </Tab>
+  <Tab title="Reactivate account">
+    `PUT /api/usuario/reactivar` — reactivate a self-suspended account. This sets `estado` back to `activo` immediately.
+
+    ```json
+    {}
+    ```
+  </Tab>
+  <Tab title="Delete account">
+    `DELETE /api/usuario/perfil` — soft-delete your account. The record is retained in the database with `estado: "eliminado"` but you are logged out and cannot log back in.
+  </Tab>
+</Tabs>
+
+## Frontend Routes
+
+The following application routes are accessible to authenticated producers:
+
+| Route | Component | Description |
+|-------|-----------|-------------|
+| `/dashboard` | `DashboardCaficultor` | Main producer dashboard |
+| `/perfil` | `PerfilProductor` | Profile and account settings |
+| `/alertas` | `Alertas` | Create and manage price alerts |
+| `/historial` | `Historial` | Historical FNC price charts |
+| `/precios` | `Precios` | Live FNC and buyer price table |
+| `/predicciones` | `Predicciones` | Next-day price predictions |
+| `/mapa` | `MapaCompradores` | Regional buyer map |
+
+## API Endpoints
+
+| Endpoint | Method | Auth required | Description |
+|----------|--------|---------------|-------------|
+| `/api/precios` | GET | Public | Live FNC and buyer prices |
+| `/api/predicciones` | GET | ✅ Authenticated | Next-day FNC price prediction |
+| `/api/alertas/usuario/:usuarioId` | GET | ✅ Owner only | List your own alerts |
+| `/api/alertas` | POST | ✅ `productor` | Create a new price alert |
+| `/api/alertas/:id` | PUT | ✅ Owner | Update alert threshold |
+| `/api/alertas/:id` | DELETE | ✅ Owner | Delete an alert |
+| `/api/historial-precios` | GET | ✅ Authenticated | Historical price records |
+| `/api/noticias` | GET | Public | Coffee news articles |
+| `/api/comprador/mapa` | GET | Public | Approved buyer locations |

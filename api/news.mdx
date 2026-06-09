@@ -1,0 +1,329 @@
+---
+title: "News API — Coffee Sector News Endpoints"
+sidebarTitle: "News"
+description: "REST endpoints to list and retrieve auto-aggregated coffee news in CoffePrice. Admin endpoints allow creating, updating, deleting, and triggering AI-based news generation."
+---
+
+The News API surfaces the coffee sector articles displayed in CoffePrice. Articles are auto-aggregated and AI-generated on a scheduled basis, but admins can also create, edit, and clean up records manually. The two read endpoints are public and require no authentication.
+
+**Base URL:** `/api/noticias`
+
+**Rate limiting:** Public `GET` endpoints are rate-limited to prevent abuse. Exceeding the limit returns `429 Too Many Requests`.
+
+---
+
+## GET /api/noticias
+
+Returns all news articles sorted by creation date (newest first). An optional `categoria` query parameter filters the results. When this endpoint is called, the platform also asynchronously checks whether new articles need to be fetched — this refresh happens in the background and does not delay the response.
+
+**Auth:** None (public)
+
+**Query parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `categoria` | string | Filter by article category. Accepted values: `mercado`, `produccion`, `internacional`, `fnc`, `clima`, `consejos`, `el_pital`. |
+
+```bash
+curl -X GET "https://your-backend.up.railway.app/api/noticias" \
+  -H "Accept: application/json"
+
+# With category filter
+curl -X GET "https://your-backend.up.railway.app/api/noticias?categoria=mercado" \
+  -H "Accept: application/json"
+```
+
+**Response `200 OK`** — Array of noticia objects.
+
+### Response fields
+
+<ResponseField name="_id" type="string">
+  MongoDB ObjectId of the article.
+</ResponseField>
+
+<ResponseField name="titulo" type="string">
+  Article headline.
+</ResponseField>
+
+<ResponseField name="resumen" type="string">
+  Short summary of the article.
+</ResponseField>
+
+<ResponseField name="contenido" type="string">
+  Full article body text.
+</ResponseField>
+
+<ResponseField name="fuente" type="string | null">
+  Name of the original source (e.g., news outlet or agency). `null` for AI-generated articles without an explicit source.
+</ResponseField>
+
+<ResponseField name="sourceUrl" type="string | null">
+  URL of the original source article, if available.
+</ResponseField>
+
+<ResponseField name="imagen" type="string | null">
+  URL of the article's cover image.
+</ResponseField>
+
+<ResponseField name="categoria" type="string">
+  One of: `mercado`, `produccion`, `internacional`, `fnc`, `clima`, `consejos`, `el_pital`.
+</ResponseField>
+
+<ResponseField name="publishedAt" type="string (ISO 8601) | null">
+  Original publication date of the source article. May be `null` for AI-generated content.
+</ResponseField>
+
+<ResponseField name="autoGenerada" type="boolean">
+  `true` if the article was created by the AI generation service.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string (ISO 8601)">
+  Timestamp when the record was inserted into the database.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string (ISO 8601)">
+  Timestamp of the most recent update to the record.
+</ResponseField>
+
+**Example response**
+
+```json
+[
+  {
+    "_id": "66a1b2c3d4e5f6a7b8c9d0e1",
+    "titulo": "Precio del café en Colombia sube un 4% esta semana",
+    "resumen": "Los precios del café pergamino seco registraron un alza significativa...",
+    "contenido": "Durante la última semana, el mercado cafetero colombiano mostró...",
+    "fuente": "Federación Nacional de Cafeteros",
+    "sourceUrl": "https://federaciondecafeteros.org/noticia-ejemplo",
+    "imagen": "https://cdn.coffeprice.com/noticias/imagen1.jpg",
+    "categoria": "mercado",
+    "publishedAt": "2024-08-14T09:00:00.000Z",
+    "autoGenerada": false,
+    "createdAt": "2024-08-14T10:30:00.000Z",
+    "updatedAt": "2024-08-14T10:30:00.000Z"
+  }
+]
+```
+
+---
+
+## GET /api/noticias/:id
+
+Returns a single news article by its MongoDB ObjectId.
+
+**Auth:** None (public)
+
+```bash
+curl -X GET https://your-backend.up.railway.app/api/noticias/66a1b2c3d4e5f6a7b8c9d0e1 \
+  -H "Accept: application/json"
+```
+
+**Response `200 OK`** — Single noticia object (same fields as the list response above).
+
+**Response `404 Not Found`**
+
+```json
+{ "message": "Noticia no encontrada" }
+```
+
+---
+
+## POST /api/noticias
+
+Manually creates a new news article. On success, the platform checks for any active news alert subscriptions and dispatches email notifications to subscribed users matching the article's category.
+
+**Auth:** Admin only
+
+### Request body
+
+<ParamField body="titulo" type="string" required>
+  Article headline.
+</ParamField>
+
+<ParamField body="resumen" type="string" required>
+  Short summary of the article content.
+</ParamField>
+
+<ParamField body="contenido" type="string" required>
+  Full article body text.
+</ParamField>
+
+<ParamField body="fuente" type="string">
+  Name of the original source or publication.
+</ParamField>
+
+<ParamField body="imagen" type="string">
+  URL pointing to the article's cover image.
+</ParamField>
+
+<ParamField body="categoria" type="string">
+  Article category. Must be one of: `mercado`, `produccion`, `internacional`, `fnc`, `clima`, `consejos`, `el_pital`.
+</ParamField>
+
+```bash
+curl -X POST https://your-backend.up.railway.app/api/noticias \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<admin_token>" \
+  -d '{
+    "titulo": "FNC actualiza precio de referencia para agosto",
+    "resumen": "La Federación Nacional de Cafeteros publicó el nuevo precio base...",
+    "contenido": "En su comunicado semanal, la FNC indicó que el precio de referencia...",
+    "fuente": "FNC",
+    "imagen": "https://cdn.coffeprice.com/noticias/fnc-agosto.jpg",
+    "categoria": "fnc"
+  }'
+```
+
+**Response `201 Created`** — Returns the newly created noticia object.
+
+**Response `400 Bad Request`** — If required fields are missing or a schema validation fails.
+
+---
+
+## PUT /api/noticias/:id
+
+Updates an existing news article. All fields are optional — only the fields provided in the body are updated.
+
+**Auth:** Admin only
+
+<ParamField body="titulo" type="string">
+  Updated headline.
+</ParamField>
+
+<ParamField body="resumen" type="string">
+  Updated summary.
+</ParamField>
+
+<ParamField body="contenido" type="string">
+  Updated article body.
+</ParamField>
+
+<ParamField body="fuente" type="string">
+  Updated source name.
+</ParamField>
+
+<ParamField body="imagen" type="string">
+  Updated image URL.
+</ParamField>
+
+<ParamField body="categoria" type="string">
+  Updated category.
+</ParamField>
+
+```bash
+curl -X PUT https://your-backend.up.railway.app/api/noticias/66a1b2c3d4e5f6a7b8c9d0e1 \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<admin_token>" \
+  -d '{"titulo": "FNC actualiza precio de referencia — revisado", "categoria": "fnc"}'
+```
+
+**Response `200 OK`** — Returns the updated noticia object.
+
+**Response `404 Not Found`** — If no article exists with the given `:id`.
+
+---
+
+## DELETE /api/noticias/:id
+
+Permanently deletes a news article. This is a hard delete — the record cannot be recovered.
+
+**Auth:** Admin only
+
+```bash
+curl -X DELETE https://your-backend.up.railway.app/api/noticias/66a1b2c3d4e5f6a7b8c9d0e1 \
+  -H "Cookie: auth_token=<admin_token>"
+```
+
+**Response `200 OK`**
+
+```json
+{ "message": "Noticia eliminada correctamente" }
+```
+
+**Response `404 Not Found`** — If no article exists with the given `:id`.
+
+---
+
+## POST /api/noticias/generar-automaticas
+
+Triggers the AI-powered news generation pipeline for the current day. The service fetches external coffee-sector sources, summarises them using the configured AI model, and saves the results as new noticia records. Useful for manually triggering a generation cycle outside of the scheduled job.
+
+**Auth:** Admin only
+
+```bash
+curl -X POST https://your-backend.up.railway.app/api/noticias/generar-automaticas \
+  -H "Cookie: auth_token=<admin_token>"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "message": "5 noticias generadas correctamente",
+  "creadas": 5
+}
+```
+
+**Response `500 Internal Server Error`** — If the AI generation service encounters an error.
+
+```json
+{
+  "message": "Error al generar noticias",
+  "error": "<error detail>"
+}
+```
+
+---
+
+## POST /api/noticias/limpiar-danadas
+
+Scans the news collection for records with broken or missing data (e.g. empty `titulo`, malformed `sourceUrl`, or corrupt auto-generated content) and removes them. Supports a dry-run mode to preview what would be deleted without committing changes.
+
+**Auth:** Admin only
+
+### Request body
+
+<ParamField body="dryRun" type="boolean">
+  If `true`, reports the number of suspect records found without deleting them. Default: `false`.
+</ParamField>
+
+<ParamField body="soloAutoGeneradas" type="boolean">
+  If `true`, only evaluates auto-generated articles (`autoGenerada: true`). Default: `true`.
+</ParamField>
+
+<ParamField body="limite" type="number">
+  Maximum number of records to scan in a single run. Default: `150`.
+</ParamField>
+
+```bash
+# Dry run — preview only
+curl -X POST https://your-backend.up.railway.app/api/noticias/limpiar-danadas \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<admin_token>" \
+  -d '{"dryRun": true, "soloAutoGeneradas": true, "limite": 100}'
+
+# Live run — delete damaged records
+curl -X POST https://your-backend.up.railway.app/api/noticias/limpiar-danadas \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=<admin_token>" \
+  -d '{"dryRun": false, "soloAutoGeneradas": true, "limite": 150}'
+```
+
+**Response `200 OK` (dry run)**
+
+```json
+{
+  "message": "Se encontraron 3 noticias sospechosas",
+  "encontradas": 3
+}
+```
+
+**Response `200 OK` (live run)**
+
+```json
+{
+  "message": "Se limpiaron 3 noticias sospechosas",
+  "eliminadas": 3
+}
+```

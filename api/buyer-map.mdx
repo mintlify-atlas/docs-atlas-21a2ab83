@@ -1,0 +1,171 @@
+---
+title: "GET /api/comprador/mapa — Public Buyer Map Data"
+sidebarTitle: "Buyer Map"
+description: "Returns all approved buyers with approximate coordinates and their latest coffee prices for display on the CoffePrice interactive Mapbox map. Public endpoint, rate-limited."
+---
+
+The map endpoint is the primary data source for the CoffePrice interactive Mapbox map. It returns a single array of sanitized buyer objects, each enriched with the buyer's most recent coffee price reference, for all approved buyers whose accounts are currently active. No authentication is required, but the endpoint is rate-limited via `publicLimiter` to prevent abuse.
+
+**Endpoint:** `GET /api/comprador/mapa`
+
+**Auth:** None (public)
+
+**Rate limiting:** Yes — requests share the `publicLimiter` pool applied to all public CoffePrice endpoints.
+
+---
+
+## Filtering
+
+The response only includes buyers that satisfy **both** of the following conditions:
+
+1. `estadoRevision` is `"aprobado"`, **or** the field is absent / `null` (legacy records treated as approved).
+2. The associated user account has `estado: "activo"`.
+
+Buyers in `perfilIncompleto`, `enRevision`, or `rechazado` states are excluded.
+
+---
+
+## Coordinate generation
+
+Exact street addresses and stored coordinates are never exposed. Instead, approximate coordinates are derived at query time using a deterministic hash of the buyer's `nombreempresa`, `direccion`, and `municipio` fields:
+
+1. The municipality name is normalised (accent marks stripped, lowercased, trimmed) and looked up in the table below to obtain a **centre coordinate**.
+2. A hash of the concatenated buyer fields produces a numeric seed.
+3. The seed generates a latitude offset and a longitude offset, each in the range **±0.009°** (roughly ±1 km), which are added to the municipality centre.
+4. `coordenadasEstimadas` is always set to `true` in every response object.
+
+If the buyer's municipality does not match any entry in the table, coordinates fall back to `el pital`.
+
+### Municipality centre coordinates
+
+| Municipality | Latitude | Longitude |
+|---|---|---|
+| `el pital` | 2.266205 | -75.805401 |
+| `pitalito` | 1.8537 | -76.0517 |
+| `acevedo` | 1.8043 | -75.8893 |
+| `la argentina` | 2.1962 | -75.9805 |
+| `tarqui` | 2.1107 | -75.8238 |
+| `suaza` | 1.9767 | -75.7947 |
+| `palestina` | 1.7238 | -76.1347 |
+| `elias` | 2.0131 | -75.9395 |
+| `saladoblanco` | 1.9933 | -76.0457 |
+| `isnos` | 1.927 | -76.2148 |
+
+---
+
+## Request
+
+```bash
+curl -X GET https://your-domain.com/api/comprador/mapa
+```
+
+---
+
+## Response fields
+
+Each object in the returned array contains the following fields.
+
+<ResponseField name="_id" type="string">
+  MongoDB ObjectId of the buyer profile.
+</ResponseField>
+
+<ResponseField name="nombreempresa" type="string">
+  Company or trade name of the buyer.
+</ResponseField>
+
+<ResponseField name="tipoempresa" type="string">
+  Category of the buying entity. One of: `cooperativa`, `trilladora`, `independiente`, `exportadora`, `otro`. Falls back to `"independiente"` if not set.
+</ResponseField>
+
+<ResponseField name="municipio" type="string | null">
+  Municipality where the buyer operates, or `null` if not set.
+</ResponseField>
+
+<ResponseField name="ubicacionGeneral" type="string">
+  Human-readable zone label derived from the municipality (e.g. `"Zona de pitalito"`). Falls back to `"Ubicacion general disponible"` when the municipality is unknown.
+</ResponseField>
+
+<ResponseField name="latitud" type="number">
+  Approximate latitude coordinate (municipality centre ± hash-based offset up to ±0.009°). Always present; never the exact stored value.
+</ResponseField>
+
+<ResponseField name="longitud" type="number">
+  Approximate longitude coordinate (municipality centre ± hash-based offset up to ±0.009°). Always present; never the exact stored value.
+</ResponseField>
+
+<ResponseField name="coordenadasEstimadas" type="boolean">
+  Always `true`. Indicates that the coordinates are approximate and should not be used for precise geolocation.
+</ResponseField>
+
+<ResponseField name="horarioApertura" type="string | null">
+  Opening time in `HH:MM` 24-hour format, or `null` if not set.
+</ResponseField>
+
+<ResponseField name="horarioCierre" type="string | null">
+  Closing time in `HH:MM` 24-hour format, or `null` if not set.
+</ResponseField>
+
+<ResponseField name="descripcion" type="string | null">
+  Short description of the buyer (max 300 characters), or `null` if not provided.
+</ResponseField>
+
+<ResponseField name="servicios" type="array">
+  List of services offered by the buyer. Returns an empty array if none are registered.
+</ResponseField>
+
+<ResponseField name="contactoRestringido" type="boolean">
+  Always `true`. Confirms that the `direccion` and `telefono` fields have been withheld from this response.
+</ResponseField>
+
+<ResponseField name="precioReferencia" type="number | null">
+  Latest price per **carga** posted by the buyer (in COP), or `null` if no price record exists.
+</ResponseField>
+
+<ResponseField name="precioKgReferencia" type="number | null">
+  Latest price per **kilogram** posted by the buyer (in COP), or `null` if no price record exists.
+</ResponseField>
+
+<ResponseField name="tipocafe" type="string | null">
+  Type of coffee associated with the latest price record (e.g. `"pergamino"`, `"castilla"`), or `null` if no price record exists.
+</ResponseField>
+
+<ResponseField name="unidadPrecio" type="string">
+  Unit associated with the latest price (typically `"carga"`). Defaults to `"carga"` when no price record exists.
+</ResponseField>
+
+<ResponseField name="precioActualizadoAt" type="string | null">
+  ISO 8601 timestamp of when the latest price record was last updated, or `null` if no price record exists.
+</ResponseField>
+
+---
+
+## Example response
+
+```json
+[
+  {
+    "_id": "64f1a2b3c4d5e6f7a8b9c0d1",
+    "nombreempresa": "Café del Sur",
+    "tipoempresa": "cooperativa",
+    "municipio": "pitalito",
+    "ubicacionGeneral": "Zona de pitalito",
+    "latitud": 1.851243,
+    "longitud": -76.044918,
+    "coordenadasEstimadas": true,
+    "horarioApertura": "07:00",
+    "horarioCierre": "17:00",
+    "descripcion": "Cooperativa cafetera con más de 20 años de experiencia.",
+    "servicios": ["pesaje", "transporte", "asistencia técnica"],
+    "contactoRestringido": true,
+    "precioReferencia": 1850000,
+    "precioKgReferencia": 10278,
+    "tipocafe": "pergamino",
+    "unidadPrecio": "carga",
+    "precioActualizadoAt": "2024-06-01T14:30:00.000Z"
+  }
+]
+```
+
+<Note>
+  Exact addresses and contact information (phone numbers, street addresses) are always omitted from this endpoint for privacy. Coordinates are intentionally imprecise. To access full contact details, the requesting user must be authenticated as the profile owner or an admin and call `GET /api/comprador/:id` instead.
+</Note>

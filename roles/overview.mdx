@@ -1,7 +1,7 @@
 ---
 title: "User Roles and Permissions in CoffePrice"
 sidebarTitle: "Overview"
-description: "CoffePrice has three roles: productor (farmer), comprador (buyer), and admin. Each role has a dedicated dashboard and access to a distinct set of features and API endpoints."
+description: "CoffePrice has three user roles — productor, comprador, and admin — each with its own dashboard, account states, and set of permitted API endpoints."
 ---
 
 CoffePrice is built around three distinct user roles — **productor**, **comprador**, and **admin** — each with its own dashboard, access level, and workflow. Understanding which role you belong to determines what you can see, what API endpoints you can call, and what account states apply to your registration. This page explains the full permission model so you can navigate the platform with confidence.
@@ -95,9 +95,9 @@ The table below summarises which role and estado combination is required for the
 | `/api/comprador/:id` | PUT | Owner or `admin` | Update buyer profile |
 | `/api/comprador/:id` | DELETE | `admin` | Delete buyer |
 | `/api/precios` | GET | Public | FNC and buyer prices |
-| `/api/predicciones` | GET | Authenticated | Next-day FNC prediction |
+| `/api/predicciones` | GET | Public | Next-day FNC prediction |
 | `/api/alertas/usuario/:id` | GET | Owner | Own alerts |
-| `/api/alertas` | POST | `productor` | Create price alert |
+| `/api/alertas` | POST | `productor` or `admin` | Create price alert |
 | `/api/noticias` | POST | `admin` | Create news article |
 | `/api/configuracion` | PUT | `admin` | Update platform settings |
 

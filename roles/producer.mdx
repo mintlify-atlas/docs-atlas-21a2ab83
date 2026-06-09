@@ -1,7 +1,7 @@
 ---
 title: "Producer (Caficultor) Role in CoffePrice"
 sidebarTitle: "Producer"
-description: "Producers (caficultores) are coffee farmers who use CoffePrice to track live FNC prices, view predictions, monitor buyer prices, set alerts, and review price history."
+description: "Producers (caficultores) use CoffePrice to track live FNC prices, AI-generated next-day predictions, buyer offers, price history, and email alerts."
 ---
 
 The **productor** role is designed for Colombian coffee farmers (caficultores) who need a single place to track the daily FNC reference price, see AI-generated next-day predictions, discover what local buyers are paying, and receive email notifications when prices cross their target threshold. After completing email verification, a producer's account is immediately active — no admin approval required.
@@ -135,11 +135,11 @@ The following application routes are accessible to authenticated producers:
 | Endpoint | Method | Auth required | Description |
 |----------|--------|---------------|-------------|
 | `/api/precios` | GET | Public | Live FNC and buyer prices |
-| `/api/predicciones` | GET | ✅ Authenticated | Next-day FNC price prediction |
+| `/api/predicciones` | GET | Public | Next-day FNC price prediction |
 | `/api/alertas/usuario/:usuarioId` | GET | ✅ Owner only | List your own alerts |
-| `/api/alertas` | POST | ✅ `productor` | Create a new price alert |
-| `/api/alertas/:id` | PUT | ✅ Owner | Update alert threshold |
-| `/api/alertas/:id` | DELETE | ✅ Owner | Delete an alert |
+| `/api/alertas` | POST | ✅ `productor` or `admin` | Create a new price alert |
+| `/api/alertas/:id` | PUT | ✅ `productor` or `admin` | Update alert threshold |
+| `/api/alertas/:id` | DELETE | ✅ `productor` or `admin` | Delete an alert |
 | `/api/historial-precios` | GET | ✅ Authenticated | Historical price records |
 | `/api/noticias` | GET | Public | Coffee news articles |
 | `/api/comprador/mapa` | GET | Public | Approved buyer locations |

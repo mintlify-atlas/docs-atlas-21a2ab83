@@ -1,7 +1,7 @@
 ---
-title: "Buyers API — Coffee Buyer Profiles and Prices"
+title: "Buyers API — Coffee Buyer Profiles, Prices and Approval"
 sidebarTitle: "Buyers"
-description: "REST endpoints to create, retrieve, update, and delete coffee buyer (comprador) profiles in CoffePrice. Buyer profiles require admin approval to appear on the public map."
+description: "Manage coffee buyer profiles in CoffePrice. Create, retrieve, update, and delete comprador records. Admin review required before profiles appear publicly."
 ---
 
 The Buyers API manages coffee buyer (*comprador*) profiles in CoffePrice. Each profile represents a purchasing entity — a cooperative, mill, independent buyer, or exporter — operating in the Huila department of Colombia. Profiles must pass an admin review before they are visible to the public on the interactive map or in price listings.
@@ -63,6 +63,10 @@ Creates a new buyer profile for the authenticated user. Each user account may ow
   Closing time in `HH:MM` 24-hour format. Defaults to `17:00`.
 </ParamField>
 
+<ParamField body="horario" type="string">
+  Free-text schedule description (e.g., `"Lunes a Sabado"`). Legacy field — prefer `horarioApertura` and `horarioCierre` for structured time data. Defaults to `null`.
+</ParamField>
+
 <ParamField body="descripcion" type="string">
   Short description of the buyer (max 300 characters).
 </ParamField>
@@ -76,15 +80,15 @@ curl -X POST https://your-domain.com/api/comprador \
   -H "Authorization: Bearer <comprador_token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "nombreempresa": "Café del Sur",
+    "nombreempresa": "Cafe del Sur",
     "tipoempresa": "cooperativa",
     "municipio": "pitalito",
     "direccion": "Calle 5 # 10-20",
     "telefono": "3101234567",
     "horarioApertura": "07:00",
     "horarioCierre": "17:00",
-    "descripcion": "Cooperativa cafetera con más de 20 años de experiencia.",
-    "servicios": ["pesaje", "transporte", "asistencia técnica"]
+    "descripcion": "Cooperativa cafetera con mas de 20 anos de experiencia.",
+    "servicios": ["pesaje", "transporte", "asistencia tecnica"]
   }'
 ```
 
@@ -95,15 +99,16 @@ curl -X POST https://your-domain.com/api/comprador \
   "comprador": {
     "_id": "64f1a2b3c4d5e6f7a8b9c0d1",
     "usuario": "64f1a2b3c4d5e6f7a8b9c0aa",
-    "nombreempresa": "Café del Sur",
+    "nombreempresa": "Cafe del Sur",
     "tipoempresa": "cooperativa",
     "municipio": "pitalito",
     "direccion": "Calle 5 # 10-20",
     "telefono": "3101234567",
+    "horario": null,
     "horarioApertura": "07:00",
     "horarioCierre": "17:00",
-    "descripcion": "Cooperativa cafetera con más de 20 años de experiencia.",
-    "servicios": ["pesaje", "transporte", "asistencia técnica"],
+    "descripcion": "Cooperativa cafetera con mas de 20 anos de experiencia.",
+    "servicios": ["pesaje", "transporte", "asistencia tecnica"],
     "estadoRevision": "enRevision",
     "UbicacionVerificada": false,
     "motivoRevision": null,
@@ -112,7 +117,7 @@ curl -X POST https://your-domain.com/api/comprador \
     "createdAt": "2024-06-01T10:00:00.000Z",
     "updatedAt": "2024-06-01T10:00:00.000Z"
   },
-  "message": "Perfil creado. Tu cuenta está pendiente de aprobación."
+  "message": "Perfil creado. Tu cuenta esta pendiente de aprobacion."
 }
 ```
 
@@ -187,7 +192,7 @@ Updates an existing buyer profile. Both the profile owner and admins may call th
 |---|---|---|
 | `id` | string | MongoDB ObjectId of the buyer profile to update. |
 
-The accepted body fields are identical to those of `POST /api/comprador` (`nombreempresa`, `tipoempresa`, `municipio`, `direccion`, `telefono`, `horarioApertura`, `horarioCierre`, `descripcion`, `servicios`), plus `latitud` (number) and `longitud` (number) for manual coordinate overrides.
+The accepted body fields are identical to those of `POST /api/comprador` (`nombreempresa`, `tipoempresa`, `municipio`, `direccion`, `telefono`, `horario`, `horarioApertura`, `horarioCierre`, `descripcion`, `servicios`), plus `latitud` (number) and `longitud` (number) for manual coordinate overrides.
 
 ```bash
 curl -X PUT https://your-domain.com/api/comprador/64f1a2b3c4d5e6f7a8b9c0d1 \

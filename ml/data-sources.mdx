@@ -81,6 +81,14 @@ Derived from the KC → COP conversion formula and the historical relationship b
 | `factor_formula_implicito` | Rolling ratio of actual FNC price to formula base (14-day median) |
 | `precio_formula_ajustada` | `precio_formula_base × factor_formula_implicito` |
 | `residuo_formula` | `precio_fnc − precio_formula_ajustada` |
+| `formula_retorno_1d` | 1-day percentage return of `precio_formula_ajustada` |
+| `gap_formula_pct` | `residuo_formula / precio_fnc` — relative divergence between formula and actual FNC |
+| `formula_lag_1` | Previous day's `precio_formula_ajustada` |
+| `formula_lag_2` | Two-day lag of `precio_formula_ajustada` |
+| `formula_ma_3` | 3-day moving average of `precio_formula_ajustada` |
+| `factor_formula_ma_7` | 7-day moving average of `factor_formula_implicito` |
+| `residuo_formula_lag_1` | Previous day's `residuo_formula` |
+| `residuo_formula_ma_7` | 7-day moving average of `residuo_formula` |
 
 ### Calendar Columns
 Allow the model to learn day-of-week and seasonal FNC pricing patterns:
@@ -116,5 +124,5 @@ Measure momentum and recent price velocity:
 | `trm_retorno_1d` | TRM 1-day percentage return |
 
 <Tip>
-The final feature set passed to XGBoost (`feature_columns()`) contains **40 columns** including `prophet_yhat` as an additional input, allowing XGBoost to learn corrections on top of Prophet's forecast rather than starting from scratch.
+The final feature set passed to XGBoost (`feature_columns()`) contains **45 columns** including `prophet_yhat` as an additional input, allowing XGBoost to learn corrections on top of Prophet's forecast rather than starting from scratch.
 </Tip>

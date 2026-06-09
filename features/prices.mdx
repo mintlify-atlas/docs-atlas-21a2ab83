@@ -1,7 +1,7 @@
 ---
-title: "Real-Time FNC Coffee Prices in CoffePrice"
+title: "CoffePrice Live FNC Coffee Prices and Buyer Offers"
 sidebarTitle: "Live Prices"
-description: "CoffePrice scrapes the FNC internal coffee price twice daily on weekdays, falls back to NY futures, and exposes prices via a public REST API with buyer-level breakdown."
+description: "CoffePrice scrapes FNC coffee prices twice daily, falls back to NY futures, and serves buyer offers via a REST API. No login required for producers."
 ---
 
 CoffePrice surfaces live coffee purchase prices posted by approved buyers across Huila. Each price record is tied to a specific buyer (`comprador`) and coffee type (`tipocafe`), and is visible to any producer or visitor via the public API — no login required. Prices are kept fresh by an automated cron job that pulls the official FNC reference price twice every business day and by buyers themselves updating their offers in real time.

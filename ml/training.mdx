@@ -109,7 +109,8 @@ The orchestrator runs these steps sequentially. Critical steps abort the pipelin
 The pipeline uses a **temporal holdout** — never random shuffling — to prevent data leakage:
 
 ```python
-test_size = max(14, int(round(len(df) * 0.20)))  # at least 14 days, at most 21
+test_size = max(14, int(round(len(df) * 0.20)))
+test_size = min(test_size, 21)  # capped at 21 days
 split_idx = len(df) - test_size
 train = df.iloc[:split_idx]
 holdout = df.iloc[split_idx:]
@@ -156,7 +157,7 @@ XGBRegressor(
 )
 ```
 
-Both use the full **40-column feature set** returned by `feature_columns()`, which includes all lag features, moving averages, formula columns, calendar columns, external variables, and `prophet_yhat`.
+Both use the full **45-column feature set** returned by `feature_columns()`, which includes all lag features, moving averages, formula columns, calendar columns, external variables, and `prophet_yhat`.
 
 ### Strategy Selection Logic
 

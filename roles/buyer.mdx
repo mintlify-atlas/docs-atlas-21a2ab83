@@ -1,7 +1,7 @@
 ---
 title: "Buyer (Comprador) Role in CoffePrice"
 sidebarTitle: "Buyer"
-description: "Buyers (compradores) register on CoffePrice to publish their coffee purchase prices, appear on the regional map, and connect with producers. Admin approval is required."
+description: "Compradores register on CoffePrice to publish purchase prices and appear on the regional map. Admin approval is required before going live."
 ---
 
 The **comprador** role is designed for coffee buyers — cooperatives, processing mills, and independent traders — who want to advertise their purchase prices to Colombian coffee farmers in the Huila region. Unlike producers, buyer accounts go through an admin approval step before they can publish prices or appear on the public map. This ensures that only legitimate, verified buyers are visible to the farming community.
@@ -20,10 +20,10 @@ The **comprador** role is designed for coffee buyers — cooperatives, processin
     Enter the 6-digit code sent to your email to confirm your address. This step is required before you can proceed.
   </Step>
   <Step title="Complete your buyer profile">
-    You are redirected to `/completar-perfil`. Fill in your company details (see [Profile Fields](#buyer-profile-fields) below). Submitting this form calls `POST /api/comprador` and creates your buyer record with `estadoRevision: "en_revision"`. An email notification is automatically sent to all active admins.
+    You are redirected to `/completar-perfil`. Fill in your company details (see [Profile Fields](#buyer-profile-fields) below). Submitting this form calls `POST /api/comprador` and creates your buyer record with `estadoRevision: "enRevision"`. An email notification is automatically sent to all active admins.
   </Step>
   <Step title="Wait for admin review">
-    An admin reviews your profile. The `estadoRevision` moves from `en_revision` to either `aprobado` or `rechazado`. You receive an email with the decision.
+    An admin reviews your profile. The `estadoRevision` moves from `enRevision` to either `aprobado` or `rechazado`. You receive an email with the decision.
   </Step>
   <Step title="Access your dashboard">
     Once approved, your user `estado` becomes `activo` and you can access `/comprador/dashboard`, publish prices, and appear on the buyer map.
@@ -87,13 +87,15 @@ The platform covers the following municipalities in the department of Huila:
 The `estadoRevision` field on the buyer record tracks where the profile is in the approval workflow:
 
 ```
-[Registration] → en_revision → aprobado
-                             → rechazado
+[Registration] → enRevision → aprobado
+                            → rechazado
+perfilIncompleto (profile not yet submitted)
 ```
 
 | estadoRevision | Meaning |
 |----------------|---------|
-| `en_revision` | Profile submitted, awaiting admin decision |
+| `perfilIncompleto` | Buyer account created but profile form not yet submitted |
+| `enRevision` | Profile submitted, awaiting admin decision |
 | `aprobado` | Admin approved — buyer is visible on the map and can publish prices |
 | `rechazado` | Admin rejected — buyer cannot publish prices; a reason may be provided |
 
@@ -169,6 +171,6 @@ The API response for unauthenticated users and producers uses `sanitizarComprado
 | `/api/comprador/mapa` | GET | Public | Approved buyers for the map |
 | `/api/comprador/:id` | GET | Optional | Public sanitised view of a buyer |
 | `/api/comprador/:id` | PUT | ✅ Owner or admin | Update buyer profile |
-| `/api/precios` | POST | ✅ `comprador` (approved) | Publish a purchase price |
-| `/api/precios/:id` | PUT | ✅ Owner | Update a published price |
-| `/api/precios/:id` | DELETE | ✅ Owner | Remove a published price |
+| `/api/precios` | POST | ✅ `comprador` or `admin` | Publish a purchase price |
+| `/api/precios/:id` | PUT | ✅ `comprador` or `admin` | Update a published price |
+| `/api/precios/:id` | DELETE | ✅ `comprador` or `admin` | Remove a published price |

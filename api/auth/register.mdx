@@ -29,7 +29,7 @@ POST /api/auth/register
 </ParamField>
 
 <ParamField body="email" type="string" required>
-  A valid, unique email address. The value is normalized to lowercase before being stored. Returns `409` if the address is already registered and verified.
+  A valid, unique email address. The value is normalized to lowercase before being stored. Returns `400` if the address is already registered and verified.
 </ParamField>
 
 <ParamField body="password" type="string" required>
@@ -117,10 +117,9 @@ A new code cannot be sent if the existing code still has more than 9 minutes of 
 
 | Status | Condition                                                                    |
 | ------ | ---------------------------------------------------------------------------- |
-| `400`  | Missing required fields, invalid email format, or password fails validation. |
-| `409`  | Email is already registered and verified (`El correo ya esta registrado`).   |
-| `429`  | Rate limit exceeded.                                                         |
-| `500`  | Unexpected server error.                                                     |
+| `400`  | Missing required fields, invalid email format, password fails validation, or email is already registered and verified (`El correo ya esta registrado`). |
+| `429`  | Rate limit exceeded.                                                                                                                                    |
+| `500`  | Unexpected server error.                                                                                                                                |
 
 ---
 
@@ -129,7 +128,7 @@ A new code cannot be sent if the existing code still has more than 9 minutes of 
 ### Register a new productor account
 
 ```bash
-curl -X POST https://api.coffeprice.com/api/auth/register \
+curl -X POST https://your-backend.up.railway.app/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "nombre": "Maria",
@@ -150,7 +149,7 @@ curl -X POST https://api.coffeprice.com/api/auth/register \
 ### Verify the email address
 
 ```bash
-curl -X POST https://api.coffeprice.com/api/auth/verify-email \
+curl -X POST https://your-backend.up.railway.app/api/auth/verify-email \
   -H "Content-Type: application/json" \
   -d '{
     "email": "maria@example.com",

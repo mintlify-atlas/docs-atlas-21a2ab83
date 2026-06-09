@@ -1,7 +1,7 @@
 ---
-title: "AI Price Predictions for FNC Coffee"
+title: "Next-Day FNC Coffee Price Predictions in CoffePrice"
 sidebarTitle: "Predictions"
-description: "CoffePrice generates next-day FNC price predictions using a hybrid Prophet + XGBoost model, updated daily by GitHub Actions with confidence ranges and trend signals."
+description: "CoffePrice predicts next-day FNC coffee prices using an ensemble of naive, Prophet, formula, and XGBoost strategies with per-prediction confidence scores."
 ---
 
 CoffePrice generates next-business-day FNC coffee price predictions using a machine-learning pipeline that runs outside the main Node.js server. Results are written to static files that the backend reads on demand — keeping prediction delivery fast and decoupled from ML execution. Every prediction comes with a price range, a directional trend signal, and a confidence score so producers can quickly judge whether to act on a prediction or wait.

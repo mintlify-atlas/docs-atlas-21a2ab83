@@ -1,7 +1,7 @@
 ---
-title: "GET /api/comprador/mapa — Public Buyer Map Data"
+title: "Buyer Map API — Public Coffee Buyer Map Endpoint"
 sidebarTitle: "Buyer Map"
-description: "Returns all approved buyers with approximate coordinates and their latest coffee prices for display on the CoffePrice interactive Mapbox map. Public endpoint, rate-limited."
+description: "Returns all approved coffee buyers with approximate coordinates and latest prices for the CoffePrice interactive map. Public, rate-limited endpoint."
 ---
 
 The map endpoint is the primary data source for the CoffePrice interactive Mapbox map. It returns a single array of sanitized buyer objects, each enriched with the buyer's most recent coffee price reference, for all approved buyers whose accounts are currently active. No authentication is required, but the endpoint is rate-limited via `publicLimiter` to prevent abuse.

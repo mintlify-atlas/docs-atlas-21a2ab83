@@ -107,7 +107,7 @@ On success the server:
 ### Example
 
 ```bash
-curl -X POST https://api.coffeprice.com/api/auth/login \
+curl -X POST https://your-backend.up.railway.app/api/auth/login \
   -H "Content-Type: application/json" \
   -c cookies.txt \
   -d '{
@@ -203,7 +203,7 @@ Sensitive fields are stripped before the document is returned. The following fie
 ### Example
 
 ```bash
-curl https://api.coffeprice.com/api/auth/me \
+curl https://your-backend.up.railway.app/api/auth/me \
   -H "Authorization: Bearer <your_jwt_token>"
 ```
 
@@ -247,7 +247,7 @@ No request body is required.
 ### Example
 
 ```bash
-curl -X POST https://api.coffeprice.com/api/auth/logout \
+curl -X POST https://your-backend.up.railway.app/api/auth/logout \
   -b cookies.txt \
   -c cookies.txt
 ```

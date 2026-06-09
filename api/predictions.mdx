@@ -1,5 +1,5 @@
 ---
-title: "Price Predictions API — FNC Forecast Endpoints"
+title: "Price Predictions API — FNC Coffee Price Forecasts"
 sidebarTitle: "Predictions"
 description: "REST endpoints to query CoffePrice's ML-generated FNC price predictions by date, offset, range, or latest. All endpoints are public and rate-limited."
 ---
@@ -65,7 +65,7 @@ An array of prediction objects sorted by date ascending.
 </ResponseField>
 
 <ResponseField name="confianza" type="number">
-  Model confidence score from `0` to `100`. Derived from the holdout MAPE metric: `max(45, min(90, round(92 - (mape * 10))))`. Fixed at `92` when `preciominimo === preciomaximo`.
+  Model confidence score from `0` to `100`. Derived from the selected strategy's holdout MAPE using `max(45, min(90, round(92 - (mape * 10))))`. Falls back to `65` when MAPE is not a finite number. Fixed at `92` when `preciominimo === preciomaximo` (point prediction with no interval).
 </ResponseField>
 
 <ResponseField name="modelVersion" type="string">
@@ -120,15 +120,15 @@ curl https://api.coffeprice.com/api/predicciones
     "preciominimo": 1820000,
     "preciomaximo": 1870000,
     "tendencia": "sube",
-    "confianza": 78,
+    "confianza": 83,
     "modelVersion": "fnc_hibrido",
     "fuente": "fnc_hibrido_historial",
     "mensaje": "Se proyecta una subida del precio del cafe en la proxima jornada.",
     "generatedAt": "2024-05-31T22:00:00.000Z",
     "variacionPorcentual": 1.5,
-    "estrategiaBase": "media_movil",
-    "holdoutMape": 1.4,
-    "holdoutMae": 26000,
+    "estrategiaBase": "naive",
+    "holdoutMape": 0.8784,
+    "holdoutMae": 19714.29,
     "explicacion": null
   },
   {
@@ -137,15 +137,15 @@ curl https://api.coffeprice.com/api/predicciones
     "preciominimo": 1825000,
     "preciomaximo": 1878000,
     "tendencia": "sube",
-    "confianza": 75,
+    "confianza": 83,
     "modelVersion": "fnc_hibrido",
     "fuente": "fnc_hibrido_json",
     "mensaje": "Se proyecta una subida del precio del cafe en la proxima jornada.",
     "generatedAt": "2024-06-01T22:00:00.000Z",
     "variacionPorcentual": 0.38,
-    "estrategiaBase": "media_movil",
-    "holdoutMape": 1.7,
-    "holdoutMae": 31000,
+    "estrategiaBase": "naive",
+    "holdoutMape": 0.8784,
+    "holdoutMae": 19714.29,
     "explicacion": null
   }
 ]
@@ -181,15 +181,15 @@ curl https://api.coffeprice.com/api/predicciones/ultima
   "preciominimo": 1825000,
   "preciomaximo": 1878000,
   "tendencia": "sube",
-  "confianza": 75,
+  "confianza": 83,
   "modelVersion": "fnc_hibrido",
   "fuente": "fnc_hibrido_json",
   "mensaje": "Se proyecta una subida del precio del cafe en la proxima jornada.",
   "generatedAt": "2024-06-01T22:00:00.000Z",
   "variacionPorcentual": 0.38,
-  "estrategiaBase": "media_movil",
-  "holdoutMape": 1.7,
-  "holdoutMae": 31000,
+  "estrategiaBase": "naive",
+  "holdoutMape": 0.8784,
+  "holdoutMae": 19714.29,
   "explicacion": null
 }
 ```
@@ -237,7 +237,7 @@ curl https://api.coffeprice.com/api/predicciones/resumen
   "preciominimo": 1825000,
   "preciomaximo": 1878000,
   "tendencia": "sube",
-  "confianza": 75,
+  "confianza": 83,
   "generatedAt": "2024-06-01T22:00:00.000Z",
   "modelVersion": "fnc_hibrido",
   "mensaje": "Se proyecta una subida del precio del cafe en la proxima jornada.",
@@ -325,7 +325,7 @@ curl "https://api.coffeprice.com/api/predicciones/rango?dias=7"
       "preciominimo": 1805000,
       "preciomaximo": 1855000,
       "tendencia": "estable",
-      "confianza": 80
+      "confianza": 83
     }
   ]
 }
@@ -369,7 +369,7 @@ curl "https://api.coffeprice.com/api/predicciones/dia?offset=1"
   "preciominimo": 1825000,
   "preciomaximo": 1878000,
   "tendencia": "sube",
-  "confianza": 75,
+  "confianza": 83,
   "generatedAt": "2024-06-01T22:00:00.000Z",
   "modelVersion": "fnc_hibrido"
 }
@@ -412,7 +412,7 @@ curl "https://api.coffeprice.com/api/predicciones/fecha?fecha=2024-06-02"
   "preciominimo": 1825000,
   "preciomaximo": 1878000,
   "tendencia": "sube",
-  "confianza": 75,
+  "confianza": 83,
   "generatedAt": "2024-06-01T22:00:00.000Z",
   "modelVersion": "fnc_hibrido"
 }
@@ -455,7 +455,7 @@ curl https://api.coffeprice.com/api/predicciones/665b2a3c4d5e6f7a8b9c0d1e
   "preciominimo": 1825000,
   "preciomaximo": 1878000,
   "tendencia": "sube",
-  "confianza": 75,
+  "confianza": 83,
   "generatedAt": "2024-06-01T22:00:00.000Z",
   "modelVersion": "fnc_hibrido",
   "createdAt": "2024-06-01T22:00:01.000Z",

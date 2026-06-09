@@ -1,7 +1,7 @@
 ---
 title: "Admin Role and Platform Management in CoffePrice"
 sidebarTitle: "Admin"
-description: "Admins in CoffePrice manage user accounts, approve buyers, moderate news and reviews, configure platform settings, and access all data across all roles."
+description: "Admins in CoffePrice approve buyer registrations, manage all user accounts, moderate news and reviews, and configure platform settings."
 ---
 
 The **admin** role is the superuser tier of CoffePrice. Admins have unrestricted read and write access across all data, can approve or reject buyer registrations, moderate platform content, and tune configuration settings that affect every user. Because the admin role carries significant privilege, there is no self-service registration path — admin accounts must be provisioned directly.
@@ -67,7 +67,7 @@ Admins have full CRUD control over every user account on the platform.
     |--------------------|------------------------------|
     | `activo` | `aprobado` |
     | `rechazado` | `rechazado` (with `motivoRevision`) |
-    | `pendiente` | `en_revision` |
+    | `pendiente` | `enRevision` |
 
     A decision email is sent to the buyer automatically.
   </Tab>
@@ -109,7 +109,7 @@ Buyer approval is the most time-sensitive admin task. When a new comprador compl
     Authorization: Bearer <admin_token>
     ```
 
-    Returns **all** buyer profiles regardless of `estadoRevision`, including those in `en_revision`. Each document is populated with the linked user's `nombre`, `apellido`, `email`, and `estado`.
+    Returns **all** buyer profiles regardless of `estadoRevision`, including those in `enRevision`. Each document is populated with the linked user's `nombre`, `apellido`, `email`, and `estado`.
   </Step>
   <Step title="Approve or reject via user state">
     Use `PUT /api/usuario/:id/estado` (see User Management above) with `estado: "activo"` to approve or `estado: "rechazado"` to reject. This is the canonical approval path because it updates both the user record and the buyer's `estadoRevision` atomically and triggers the decision email.
@@ -221,7 +221,7 @@ A `200` response confirms the review has been approved. Approved reviews appear 
 | `/configuracion` | `Configuracion` | Platform configuration editor |
 | `/historial` | `Historial` | Full price history (accessible to admins and producers) |
 | `/predicciones` | `Predicciones` | Price prediction view |
-| `/mapa` | `MapaCompradores` | Regional buyer map |
+| `/mapa` | `MapaCompradores` | Regional buyer map (rendered in `LayoutComprador`) |
 
 ## Permission Summary
 
@@ -235,4 +235,4 @@ A `200` response confirms the review has been approved. Approved reviews appear 
 | Platform config | `PUT /api/configuracion` | ✅ | ❌ | ❌ |
 | Moderate reviews | `PUT /api/resenas-plataforma/:id/aprobar` | ✅ | ❌ | ❌ |
 | View prices | `GET /api/precios` | ✅ | ✅ | ✅ |
-| View predictions | `GET /api/predicciones` | ✅ | ✅ | ✅ |
+| View predictions | `GET /api/predicciones` | ✅ (public) | ✅ (public) | ✅ (public) |

@@ -1,7 +1,7 @@
 ---
-title: "Price Alerts API — Threshold Notifications"
+title: "Price Alerts API — Coffee Price Threshold Notifications"
 sidebarTitle: "Alerts"
-description: "Create and manage price alerts in CoffePrice. When a buyer posts a price at or above your threshold, an email notification is sent automatically."
+description: "Create and manage price alerts in CoffePrice. Get notified via email, WhatsApp, or push when a buyer posts a price at or above your threshold."
 ---
 
 The Alerts API lets coffee producers configure price-threshold notifications. When a registered buyer publishes a purchase price that meets or exceeds a producer's `precioMinimo`, the platform sends an automatic email notification. Alerts can target a specific buyer or watch all buyers at once.
@@ -33,7 +33,7 @@ The Alerts API lets coffee producers configure price-threshold notifications. Wh
 
 ## GET /api/alertas/usuario/:usuarioId
 
-Returns all alerts belonging to a specific user, with buyer details (`nombreempresa`, `tipo`) populated.
+Returns all alerts belonging to a specific user, with buyer details (`nombreempresa`) populated.
 
 **Auth:** Owner of the alerts or admin. Returns `403` if neither condition is met.
 
@@ -51,8 +51,7 @@ curl -X GET https://your-backend.up.railway.app/api/alertas/usuario/64f1a2b3c4d5
     "usuario": "64f1a2b3c4d5e6f7a8b9c0d1",
     "comprador": {
       "_id": "64f9a8b7c6d5e4f3a2b1c0d9",
-      "nombreempresa": "Café del Sur S.A.S.",
-      "tipo": "exportador"
+      "nombreempresa": "Café del Sur S.A.S."
     },
     "precioMinimo": 1250000,
     "activa": true,

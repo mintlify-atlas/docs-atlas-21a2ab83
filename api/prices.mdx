@@ -1,7 +1,7 @@
 ---
-title: "Coffee Prices API — Buyer Price Management"
+title: "Coffee Prices API — Manage Buyer Coffee Price Listings"
 sidebarTitle: "Prices"
-description: "REST endpoints to list, create, update, and delete coffee buyer prices in CoffePrice. Public GET, authenticated POST/PUT/DELETE restricted to comprador and admin roles."
+description: "REST endpoints for coffee buyer prices in CoffePrice. Public GET lets producers compare offers; POST, PUT, and DELETE require comprador or admin auth."
 ---
 
 The Prices API is the core market-data layer of CoffePrice. It exposes the current buying prices that approved coffee buyers (`comprador`) publish for each coffee type. Producers use the public `GET` endpoints to compare offers across the market in real time. Authenticated buyers and admins use `POST`, `PUT`, and `DELETE` to manage their own price listings. Every write operation automatically logs a history entry, re-evaluates active producer price alerts, and dispatches email notifications to all active producers on the platform.
@@ -70,7 +70,7 @@ Returns all active price listings from approved buyers. Results are sorted by `p
 </ResponseField>
 
 <ResponseField name="unidad" type="string">
-  Unit of measure: `carga` for `pergamino_seco`, `especial`, and `organico`; `kg` for `pasilla`, `cacao`, and `limon`. Set automatically on save.
+  Unit of measure: `carga` for `pergamino_seco`, `especial`, `organico`, and `verde`; `kg` for `pasilla`, `cacao`, and `limon`. Set automatically on save based on `tipocafe`.
 </ResponseField>
 
 <ResponseField name="createdAt" type="string (ISO 8601)">
@@ -206,7 +206,7 @@ If an identical combination of `comprador`, `tipocafe`, and `preciocarga` was al
 </ParamField>
 
 <ParamField body="preciocarga" type="number" required>
-  Offered price. Must be a finite number greater than `0`. Represents price per carga for `pergamino_seco`, `especial`, and `organico`; price per kg for `pasilla`, `cacao`, and `limon`.
+  Offered price. Must be a finite number greater than `0`. Represents price per carga for `pergamino_seco`, `especial`, `organico`, and `verde`; price per kg for `pasilla`, `cacao`, and `limon`.
 </ParamField>
 
 <ParamField body="tipocafe" type="string" required>
@@ -362,7 +362,7 @@ Returns the current FNC (Federación Nacional de Cafeteros) reference price serv
 
 **Authentication:** None — public, rate-limited.
 
-If the cache is populated and fresh, the response is returned immediately. If the cache is stale, a background refresh is triggered and the last known value is returned instantly. If the cache is empty and a refresh is in progress, the server responds with HTTP `202`. If no price can be obtained at all, the server responds with HTTP `503`.
+If the cache is populated and fresh, the response is returned immediately. If the cache is stale, a background refresh is triggered in the background and the last known value is returned instantly. If the cache is empty and a refresh is already in progress, the server responds with HTTP `202`. If no price can be obtained at all, the server responds with HTTP `503`.
 
 ### Response fields
 
@@ -378,18 +378,58 @@ If the cache is populated and fresh, the response is returned immediately. If th
   Human-readable timestamp of the last successful scrape, formatted in the `America/Bogota` timezone. `null` if unavailable.
 </ResponseField>
 
+<ResponseField name="stale" type="boolean">
+  Present on non-fresh responses. `false` when a synchronous refresh just succeeded; `true` when the value is outdated or unavailable. Omitted on normal cached responses.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Present on `202` and `503` responses. Human-readable status message explaining the current cache state, in Spanish.
+</ResponseField>
+
+### Responses
+
+| Status | Condition |
+|--------|-----------|
+| 200 | Cache is populated. Returns the current price. May include `stale: false` if a blocking refresh just completed. |
+| 202 | Cache is empty and a refresh is already running. Returns `precio: null` with `stale: false` and a `message`. |
+| 503 | No price is available and all refresh attempts failed. Returns `precio: null` with `stale: true` and a `message`. |
+
 ### Example request
 
 ```bash
 curl https://api.coffeprice.com/api/precio-fnc
 ```
 
-### Example response
+### Example response (cache hit)
 
 ```json
 {
   "precio": 1842000,
   "fuente": "fnc_scraper",
   "actualizadoEn": "1/6/2024, 9:05:00 a. m."
+}
+```
+
+### Example response (202 — refresh in progress)
+
+```json
+{
+  "precio": null,
+  "fuente": null,
+  "actualizadoEn": null,
+  "stale": false,
+  "message": "Actualizando precio FNC. Intenta nuevamente en unos segundos."
+}
+```
+
+### Example response (503 — price unavailable)
+
+```json
+{
+  "precio": null,
+  "fuente": null,
+  "actualizadoEn": null,
+  "stale": true,
+  "message": "No fue posible actualizar el precio FNC en este momento."
 }
 ```
